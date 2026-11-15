@@ -25,6 +25,13 @@ SAME_VOICE_SHORT = 0.38  # for clips under SHORT_SECONDS, against people already
 SHORT_SECONDS = 1.5
 MIN_SECONDS = 0.35  # below this a clip says too little about the voice
 LEARN_FROM = 0.62  # only confident matches refine a voiceprint
+# The owner's match against their enrolment swings widely on a phone (measured 0.39 to 0.59
+# minutes after enrolling), and a different voice can reach 0.4 against them, so no single
+# threshold separates the two. Two things are done instead: the owner's voiceprint keeps
+# learning from the clips it is sure of, and a voice in the doubtful range is treated as
+# probably the owner for requests only.
+OWNER_FLOOR = 0.30  # at or above this, an unrecognised voice is "probably the owner"
+OWNER_LEARN_FROM = 0.50  # the owner's own voiceprint keeps learning from clips this sure
 
 
 @dataclass
@@ -70,6 +77,7 @@ class Roster:
 
     speakers: dict[str, Speaker] = field(default_factory=dict)
     next_anon: int = 2
+    owner_score: float = 0.0  # how much the last clip judged resembled the owner
 
     @classmethod
     def from_people(cls, people: list[dict]) -> "Roster":
@@ -107,13 +115,20 @@ class Roster:
         best_score, best = scored[0] if scored else (0.0, None)
         short = seconds < SHORT_SECONDS
         print(f"voice: {seconds:.1f}s " + ", ".join(f"{sp.label}={sc:.2f}" for sc, sp in scored[:4]), flush=True)
+        # How much this clip resembles the owner, whoever it is finally given to. A voice that is
+        # not confidently anyone's but resembles the owner is remembered as "probably the owner":
+        # their requests to Wingman are honoured, without their words being filed as the owner's.
+        self.owner_score = next((sc for sc, sp in scored if sp.key == "owner"), 0.0)
         if best is not None and best_score >= (SAME_VOICE_SHORT if short else SAME_VOICE):
+            if best.key.startswith("anon"):
+                best.owner_like = max(getattr(best, "owner_like", 0.0), self.owner_score)
             # A short clip must also clearly prefer this voice over the runner-up.
             if not short or len(scored) < 2 or best_score - scored[1][0] >= 0.08:
                 best.session_seconds += seconds
-                if best_score >= LEARN_FROM and not short:
+                if best_score >= (OWNER_LEARN_FROM if best.key == "owner" else LEARN_FROM) and not short:
                     best.total = best.total + vector * seconds
                     best.seconds += seconds
+                    best.learned = getattr(best, "learned", 0.0) + seconds
                 return best, best_score
         # A short clip only starts a new speaker when it is clearly unlike every known voice.
         if short and not (seconds >= 0.9 and best_score < 0.25):
@@ -126,6 +141,7 @@ class Roster:
             seconds=seconds,
             session_seconds=seconds,
         )
+        speaker.owner_like = self.owner_score
         self.next_anon += 1
         self.speakers[speaker.key] = speaker
         return speaker, 1.0
@@ -150,6 +166,7 @@ class Attributed:
     start: float
     end: float
     confidence: float
+    owner_score: float = 0.0  # how much the clip resembled the owner, whoever it was given to
 
 
 def sentences(words: list[Word]) -> list[list[Word]]:
@@ -173,6 +190,7 @@ def attribute(
 ) -> list[Attributed]:
     """Split one finished stretch of words into runs by speaker."""
     judged: list[tuple[list[Word], Speaker | None, float]] = []
+    resembles: dict[int, float] = {}
     for sentence in sentences(words):
         start, end = sentence[0].start, sentence[-1].end
         seconds = end - start
@@ -180,6 +198,7 @@ def attribute(
             judged.append((sentence, None, 0.0))
             continue
         speaker, score = roster.identify(embedder.embed(audio(start - 0.1, end + 0.1)), seconds)
+        resembles[id(sentence)] = roster.owner_score
         judged.append((sentence, None if speaker is UNKNOWN else speaker, score))
 
     # Sentences that could not be judged alone are judged together: two short sentences by
@@ -214,10 +233,11 @@ def attribute(
     for sentence, speaker, score in judged:
         speaker = speaker or UNKNOWN
         text = " ".join(word.text for word in sentence)
+        like = resembles.get(id(sentence), 0.0)
         if runs and runs[-1].speaker is speaker:
             last = runs[-1]
             runs[-1] = Attributed(speaker, f"{last.text} {text}", last.start, sentence[-1].end,
-                                  min(last.confidence, score))
+                                  min(last.confidence, score), max(last.owner_score, like))
         else:
-            runs.append(Attributed(speaker, text, sentence[0].start, sentence[-1].end, score))
+            runs.append(Attributed(speaker, text, sentence[0].start, sentence[-1].end, score, like))
     return runs

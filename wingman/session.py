@@ -29,8 +29,8 @@ KEEP_AUDIO_SECONDS = 180  # audio is held only this long, in memory, to tell spe
 TRAIL_SILENCE = 1.0  # you trailed off and stayed quiet this long
 ASKED_SILENCE = 1.2  # someone asked you something and you stayed quiet this long
 TRIGGER_GAP = 2.5  # at least this long between unprompted model calls
-ASSIST_GAP = 8.0  # at least this long between looks for something worth stepping in with
-ASSIST_GAP_DEMO = 3.0
+ASSIST_GAP = 4.0  # at least this long between looks for something worth stepping in with
+ASSIST_GAP_DEMO = 2.0
 REJOIN_WITHIN = 300.0  # the same people speaking again this soon are still in one conversation
 REJOIN_WITHIN_DEMO = 90.0
 # Said at the end of a conversation; after one of these a short silence is enough to close it.
@@ -111,6 +111,8 @@ class Session:
         self.engaged_until = -1.0  # after Wingman answers, a follow-up needs no "Wingman"
         self.asked_to_add = -1.0  # until when a plain "yes" or "no" answers "should I add them?"
         self.assisting = False
+        self.known_at_start: set[str] = set()  # voices Wingman already knew when this conversation began
+        self.greeted: set[str] = set()  # returning people the owner has been briefed on
         self.held: list[Line] = []  # lines heard before the owner had taken part
         self.discarded = False  # ended without the owner taking part, and was not kept
         self.warmed = -100.0
@@ -146,6 +148,7 @@ class Session:
             self.store.query("whispers:grades"),
         )
         self.roster = speakers.Roster.from_people(voices)
+        self.known_at_start = {key for key in self.roster.speakers if key != "owner"}
         self.old_promises = promises
         self.governor.learn(grades)
         self.conversation = await self.store.mutation("conversations:start")
@@ -178,7 +181,7 @@ class Session:
     def taking_part(self) -> bool:
         """Has the owner said enough here for this to count as a conversation of theirs."""
         return any(line.addressed for line in self.lines) or sum(
-            len(line.text.split()) for line in self.lines if line.who == "you") >= 4
+            len(line.text.split()) for line in self.lines if line.who == "you" or line.maybe_you) >= 4
 
     @property
     def said_goodbye(self) -> bool:
@@ -247,6 +250,16 @@ class Session:
                 pass  # already gone, for instance after "Delete everything"
             await self.emit({"type": done, "conversation": None})
             return None
+        # The owner's own voiceprint keeps learning from what it was sure of, so it comes to fit
+        # how they actually sound through this phone, in the rooms they are in.
+        me = self.roster.speakers.get("owner")
+        if me is not None and getattr(me, "learned", 0.0) >= 6.0:
+            name = next((p["name"] for p in self.people if p.get("isOwner")), "Me")
+            try:
+                await self.store.mutation("people:upsert", name=name, isOwner=True,
+                                          voiceprint=me.voiceprint.tolist(), voiceSeconds=min(me.seconds, 120.0))
+            except StoreError:
+                pass
         # Named people are remembered by voice for next time.
         for speaker in self.roster.speakers.values():
             if speaker.key != "owner" and speaker.person_id and speaker.session_seconds >= 3:
@@ -271,11 +284,29 @@ class Session:
         recall.later(recall.keep_conversation(
             self.conversation, summary.get("title") or "Conversation", summary.get("summary") or "",
             summary.get("points") or [], brain.transcript(self.lines, 150), datetime.now().strftime("%A %d %B %Y")))
-        mine = sum(len(line.text.split()) for line in self.lines if line.who == "you" and not line.retracted)
-        if mine >= 12:  # what the owner said about themselves joins what Wingman knows of them
+        own_words = sum(len(line.text.split()) for line in self.lines if line.who == "you" and not line.retracted)
+        if own_words >= 12:  # what the owner said about themselves joins what Wingman knows of them
             profile.schedule(self.store, "Conversations", "A conversation the owner (labelled You) just had:\n"
                              + brain.transcript(self.lines, 120))
         return summary
+
+    async def _greet(self, speaker):
+        """Someone whose voice Wingman knows has just started talking. Tell the owner who it
+        is and where things stand, once, if there is anything to say."""
+        try:
+            page = await self.store.query("people:profile", id=speaker.person_id)
+        except StoreError:
+            return
+        if not page:
+            return
+        earlier = [c for c in page.get("conversations") or [] if c["_id"] != self.conversation and c.get("summary")]
+        person = page["person"]
+        if not earlier and not page.get("owe") and not page.get("owed") and not person.get("about"):
+            return  # a name alone is not worth a whisper
+        text = await brain.greet(person, page.get("owe") or [], page.get("owed") or [], earlier[:2])
+        if text and not self.ended:
+            self._offer(Candidate("brief", text, 0.95, f"{person['name']} started speaking", "people",
+                                  self.now, key=f"brief:{speaker.person_id}"))
 
     async def _describe_people(self, people: list[dict]):
         """With the whole conversation in view, write down who each named person is and what
@@ -284,19 +315,39 @@ class Session:
         owner = next((p["name"].lower() for p in self.people if p.get("isOwner")), "")
         for person in people:
             name, about = person["name"], person["about"]
-            if not about or name.lower() in (owner, "you", "wingman") or name.lower().startswith("speaker "):
+            if name.lower() in (owner, "you", "wingman") or name.lower().startswith("speaker "):
+                continue
+            if not about and not person.get("speaker"):
                 continue
             known = next((p for p in self.people if p["name"].lower() == name.lower()), None)
             before = (known or {}).get("about") or ""
-            if about.lower() in before.lower():
-                continue
+            said, had = _meaning(about), _meaning(before)
+            if about and (about.lower() in before.lower() or (said and len(said & had) >= 0.6 * len(said))):
+                about = ""  # nothing new to write, but their voice may still be worth naming
             try:
-                person_id = await self.store.mutation("people:upsert", name=name,
-                                                      about=f"{before}; {about}"[:400] if before else about[:400])
+                person_id = await self.store.mutation(
+                    "people:upsert", name=name,
+                    about=(f"{before}; {about}"[:400] if before else about[:400]) if about else None)
                 if person_id:
                     await self.store.mutation("conversations:addPerson", id=self.conversation, personId=person_id)
             except StoreError:
                 continue
+            # Seen whole, the conversation often makes clear which unnamed voice this was. Naming
+            # it now is what lets Wingman recognise them next time they speak.
+            voice = self.roster.by_label(person.get("speaker") or "")
+            if person_id and voice is not None and voice.key.startswith("anon") and voice.seconds >= 3:
+                old = voice.label
+                self.roster.name(voice.key, name, person_id)
+                for line in self.lines:
+                    if line.label == old:
+                        line.label, line.person_id, line.who = name, person_id, "other"
+                try:
+                    await self.store.mutation("conversations:relabel", conversationId=self.conversation,
+                                              fromLabel=old, label=name, who="other", personId=person_id)
+                    await self.store.mutation("people:upsert", name=name, voiceprint=voice.voiceprint.tolist(),
+                                              voiceSeconds=min(voice.seconds, 120.0))
+                except StoreError:
+                    pass
 
     def _draft_follow_ups(self):
         """Each promise the owner made in this conversation gets its follow-up message written
@@ -327,8 +378,8 @@ class Session:
             owed = []
         for todo in todos:
             text = str(todo["text"]).strip().rstrip(".")
-            mine = _meaning(text)
-            if any(len(mine & other) >= 2 and len(mine & other) >= 0.6 * min(len(mine), len(other)) for other in owed):
+            wanted = _meaning(text)
+            if any(len(wanted & other) >= 2 and len(wanted & other) >= 0.6 * min(len(wanted), len(other)) for other in owed):
                 continue  # already on the list as a promise the owner made
             due = actions.parse_when(str(todo.get("when") or ""))
             if not text:
@@ -370,10 +421,18 @@ class Session:
             self.speech_began = now
         if speaking:
             self.last_speech = now
+        stopped = self.speaking and not speaking
         if speaking != self.speaking:
             self.speaking = speaking
             await self.emit({"type": "speech", "speaking": speaking})
         await self.stream.send(pcm)
+        if stopped:
+            # Someone just stopped talking: ask for their words now, not after the speech
+            # service has waited to be sure. Everything downstream starts that much sooner.
+            try:
+                await self.stream.finalize()
+            except Exception:  # noqa: BLE001 - the words still arrive the usual way
+                pass
         await self._tick()
 
     def clip(self, start: float, end: float) -> bytes:
@@ -410,6 +469,9 @@ class Session:
             request = event.text  # carrying on the exchange with Wingman
         if request and len(request.split()) >= 3 and self._owner_is_speaking(event.start, least=0.5):
             self._start_early(request)
+        if (request is None and self.taking_part and len(event.text.split()) >= 7
+                and not self._owner_is_speaking(event.start, least=0.5)):
+            self._maybe_assist(interim=event.text)  # someone else is mid-sentence: start looking now
         utterance = round(event.start, 1)
         kind = brain.stall(event.text)
         if kind and utterance not in self.triggered_utterances and self._owner_is_speaking(event.start):
@@ -428,12 +490,24 @@ class Session:
         await self._maybe_rejoin(runs)
         new = []
         for run in runs:
+            run.speaker.last_heard = self.now
+            who = run.speaker
+            if (who.person_id and who.key not in ("owner", "unknown") and who.key in self.known_at_start
+                    and who.key not in self.greeted and who.session_seconds >= 1.2):
+                self.greeted.add(who.key)
+                task = asyncio.create_task(self._greet(who))
+                self.tasks.add(task)
+                task.add_done_callback(self.tasks.discard)
             echoed = sum(max(0.0, min(run.end, b) - max(run.start, a)) for a, b in self.spoke[-6:])
             if run.speaker.who != "you" and echoed > 0.5 * max(0.2, run.end - run.start):
                 continue  # that was Wingman itself, heard through a loudspeaker
             line = Line(who=run.speaker.who, label=run.speaker.label, text=run.text,
                         start=run.start + self.offset, end=run.end + self.offset,
                         person_id=run.speaker.person_id)
+            # Not recognised as anyone, but it resembles the owner: probably the owner on a bad
+            # clip. Their requests are honoured; their words are not filed as the owner's.
+            line.maybe_you = (line.who != "you" and line.person_id is None and max(
+                run.owner_score, getattr(run.speaker, "owner_like", 0.0)) >= speakers.OWNER_FLOOR)
             new.append(line)
             # What people say is kept for memory and recaps, but is not put on the screen.
         utterance = round(segment.start, 1)
@@ -454,8 +528,10 @@ class Session:
     def _on_lines(self, new: list[Line], already: bool):
         self.lines.extend(new)
         self.trail = self.asked = None
+        # Present means heard in the last three minutes, not at any point in the conversation:
+        # people leave, and a reminder about someone who has gone is noise.
         present = {s.person_id for s in self.roster.speakers.values()
-                   if s.person_id and s.session_seconds > 0}
+                   if s.person_id and s.session_seconds > 0 and self.now - getattr(s, "last_heard", -1e9) <= 180}
         for line in new:
             if GOODBYE.search(line.text):
                 self.goodbye_at = line.start
@@ -469,6 +545,10 @@ class Session:
                         self.answered.add(cue.key)
                         if cue is self.pending:
                             self.pending = None
+            if line.who != "you" and line.person_id is None and (brain.called(line.text) or ""):
+                # Said to Wingman by name, by a voice that is nobody it knows: on the owner's own
+                # phone that is the owner, whose voice was not recognised this time.
+                line.who, line.label = "you", "You"
             if line.who == "unknown" and brain.called(line.text) == "" and line.end - line.start < 1.5:
                 # Just the name, too short to tell whose voice it is: taken as the owner calling.
                 line.who, line.addressed = "you", True
@@ -720,27 +800,32 @@ class Session:
             if not prompted:
                 self.resolving = False
 
-    def _maybe_assist(self):
-        """Every so often, with enough new talk, look for something worth stepping in with."""
+    def _maybe_assist(self, interim: str = ""):
+        """Every so often, with enough new talk, look for something worth stepping in with.
+        `interim` is what someone else is saying right now: looking while they are still
+        speaking means the line is ready the moment they pause."""
         fresh = [line for line in self.lines[self.assisted_upto:] if not line.addressed and not line.retracted]
         gap = ASSIST_GAP_DEMO if self.governor.demo else ASSIST_GAP
         # Only in a conversation the owner is part of, and only about what someone else said:
         # a video playing nearby, or the owner's own words, are not moments to step in.
         if not any(line.who == "you" and not line.addressed and line.end > self.now - 120 for line in self.lines):
             return
-        if not any(line.who != "you" for line in fresh):
+        if not interim and not any(line.who != "you" for line in fresh):
             return
         if (self.assisting or self.pending or self.delivering or self.now - self.last_assist < gap
-                or self.now < self.engaged_until or sum(len(line.text.split()) for line in fresh) < 5):
+                or self.now < self.engaged_until
+                or sum(len(line.text.split()) for line in fresh) + len(interim.split()) < 5):
             return
-        self.assisting, self.last_assist, self.assisted_upto = True, self.now, len(self.lines)
-        task = asyncio.create_task(self._assist(self.now))
+        self.assisting, self.last_assist = True, self.now
+        if not interim:
+            self.assisted_upto = len(self.lines)
+        task = asyncio.create_task(self._assist(self.now, interim))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def _assist(self, born: float):
+    async def _assist(self, born: float, interim: str = ""):
         try:
-            recent = " ".join(line.text for line in self.lines[-4:])
+            recent = " ".join(line.text for line in self.lines[-4:]) + " " + interim
             words = [w for w in re.findall(r"[A-Za-z0-9]+", recent) if len(w) >= 4][-12:]
             memories, past = [], []
             try:
@@ -760,7 +845,7 @@ class Session:
                 pass
             if not memories and not past and not self.people:
                 return
-            candidate = await brain.assist(self.lines, memories, self.people, past, self.cues, born)
+            candidate = await brain.assist(self.lines, memories, self.people, past, self.cues, born, interim)
             if candidate and not self.ended:
                 self.cues.append(candidate.text)
                 self._offer(candidate)
@@ -1005,7 +1090,7 @@ class Session:
         asked = [r for r in requests if r.get("action") in ("ask", "research")]
         requests = [r for r in requests if r.get("action") not in ("ask", "research")]
         if asked:
-            said = next((line for line in reversed(batch) if line.who == "you"), None)
+            said = next((line for line in reversed(batch) if line.who == "you" or line.maybe_you), None)
             if said is not None:
                 said.addressed = True
                 self.spoken_end = said.end
@@ -1018,11 +1103,11 @@ class Session:
                                   "your request", self.now, prompted=True, key=f"task:{done[0]['id']}"))
 
         if notes["retract"]:
-            mine = [line for line in self.lines if line.who == "you"]
+            own = [line for line in self.lines if line.who == "you"]
             said = [line for line in batch if line.who == "you"]
-            if said and said[-1] in mine:
-                index = mine.index(said[-1])
-                taken_back = mine[max(0, index - 1): index] or []
+            if said and said[-1] in own:
+                index = own.index(said[-1])
+                taken_back = own[max(0, index - 1): index] or []
                 for line in taken_back:
                     line.retracted = True
                 ids_ = [line.id for line in taken_back if line.id]

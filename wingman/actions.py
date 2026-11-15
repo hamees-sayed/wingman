@@ -73,7 +73,8 @@ async def carry_out(store: Store, requests: list, conversation: str | None = Non
             except (TypeError, ValueError):
                 minutes = 30
             clash = await google.clashes(due, minutes)
-            event = await google.create_event(what, due, minutes, str(request.get("where") or "").strip())
+            event = await google.create_event(what, due, minutes, str(request.get("where") or "").strip(),
+                                              [g for g in request.get("guests") or [] if "@" in str(g)])
             if event:
                 done.append({"id": f"event:{due}", "kind": "event", "text": what, "due": due,
                              "dueText": None, "clash": clash[0]["title"] if clash else None})

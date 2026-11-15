@@ -17,6 +17,7 @@ from typing import Any
 
 from wingman import google, notion, recall, slack, users
 from wingman.actions import carry_out, slack_todos
+from wingman.actions import confirmation as actions_confirmation
 from wingman.store import Store, StoreError
 
 ToolFn = Callable[[Store, dict[str, Any]], Awaitable["ToolResult"]]
@@ -360,10 +361,33 @@ async def calendar_create_tool(store: Store, args: dict[str, Any]) -> ToolResult
     when = str(args.get("when") or "").strip()
     if not title or not when:
         return _one("Please provide both title and when.")
-    return await _act(store, {
-        "action": "book", "what": title, "when": when,
+    # Guests are invited by email. A name is looked up in the owner's contacts and mail; one
+    # that cannot be found is left off and said so, never guessed.
+    emails, missing = [], []
+    for guest in args.get("guests") or []:
+        guest = str(guest).strip()
+        if not guest:
+            continue
+        email = guest if "@" in guest else await google.email_of(guest)
+        (emails if email else missing).append(email or guest)
+    if (emails or missing) and not google.can_book():
+        return _one("Google Calendar is not connected, so no invitation can be sent.")
+    result = await _act(store, {
+        "action": "book", "what": title, "when": when, "guests": emails,
         "minutes": int(args.get("minutes") or 30), "where": str(args.get("where") or "").strip(),
     })
+    note = ""
+    if emails:
+        note += f" Invitation sent to {', '.join(emails)}."
+    if missing:
+        note += (f" No email address was found for {', '.join(missing)}, so they were not invited: "
+                 "ask the owner for it and then invite them.")
+    if note:
+        result.text += note
+        for item in result.done:
+            if item.get("kind") == "event":
+                item["kind"], item["text"] = "said", f"{actions_confirmation([item])} {item['text']}.{note}"
+    return result
 
 
 async def calendar_move_tool(store: Store, args: dict[str, Any]) -> ToolResult:
@@ -559,8 +583,9 @@ def registry() -> dict[str, Tool]:
                               _params(["text"], text={"type": "string"}), todo_complete_tool),
         "todo_remove": Tool("todo_remove", "Delete a to-do, reminder or promise the owner no longer wants. Give its wording from the list.",
                             _params(["text"], text={"type": "string"}), todo_remove_tool),
-        "calendar_create": Tool("calendar_create", "Put an event on the owner's Google calendar. Check calendar_events first for a clash.", _params(
-            ["title", "when"], title={"type": "string"}, when={"type": "string", "description": "Local time as YYYY-MM-DDTHH:MM, worked out from now. Leave empty if no time was given."},
+        "calendar_create": Tool("calendar_create", "Put an event on the owner's Google calendar and, when guests are given, send them the invitation. Use for 'send X an invite', 'set up a meeting with X'. Check calendar_events first for a clash.", _params(
+            ["title", "when"], title={"type": "string"},
+            guests={"type": "array", "items": {"type": "string"}, "description": "People to invite: a name the owner used, or an email address if one was said."}, when={"type": "string", "description": "Local time as YYYY-MM-DDTHH:MM, worked out from now. Leave empty if no time was given."},
             minutes={"type": "integer", "minimum": 5, "maximum": 600}, where={"type": "string"}),
             calendar_create_tool),
         "calendar_move": Tool("calendar_move", "Move an existing calendar event to a new start time, keeping its length. Give the event's title or who it is with.", _params(

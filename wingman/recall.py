@@ -33,8 +33,11 @@ def _http() -> httpx.AsyncClient:
 
 
 def space() -> str:
-    """This account's own space. Nothing is ever searched across spaces."""
-    return "wingman_" + users.user()
+    """This account's own space. Nothing is ever searched across spaces.
+
+    Two servers with separate databases can share one Supermemory key; each then sets its own
+    SUPERMEMORY_SPACE, or their first owners (both called "owner") would share a space."""
+    return (os.environ.get("SUPERMEMORY_SPACE") or "wingman") + "_" + users.user()
 
 
 def fact_id(text: str) -> str:

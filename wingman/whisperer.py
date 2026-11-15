@@ -24,7 +24,7 @@ STALE_AFTER = 6.0  # a name that arrives later than this is no longer wanted
 STALE_AFTER_ASKED = 12.0
 # How long nobody must have been speaking before a whisper starts.
 STALE_AFTER_CUE = 9.0  # a nudge or an explanation is still useful a little later
-PAUSE_NEEDED = {"name": 0.25, "fact": 0.25, "ask": 0.2, "promise": 0.7, "nudge": 0.25, "explain": 0.25}
+PAUSE_NEEDED = {"name": 0.25, "fact": 0.25, "ask": 0.2, "promise": 0.7, "nudge": 0.25, "explain": 0.25, "brief": 0.3}
 
 
 @dataclass
@@ -48,7 +48,7 @@ class Governor:
 
     def stale(self, candidate: Candidate, now: float) -> bool:
         limit = STALE_AFTER_ASKED if candidate.prompted else STALE_AFTER
-        if candidate.kind in ("nudge", "explain"):
+        if candidate.kind in ("nudge", "explain", "brief"):
             limit = STALE_AFTER_CUE
         return now - candidate.born > limit
 

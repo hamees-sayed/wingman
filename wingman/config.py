@@ -32,6 +32,9 @@ GATE_MODEL = os.environ.get("WINGMAN_GATE_MODEL", "gpt-6-luna")
 THINK_MODEL = os.environ.get("WINGMAN_THINK_MODEL", "gpt-6-luna")
 # The agent the owner talks to: measured faster to its first word than the model above, and it
 # does not reach for a tool when a plain answer will do.
+# Nudges and explanations: the same fast model. Measured at about 0.9 s against 1.5 s, with the
+# same decisions on when to speak and when to stay silent.
+ASSIST_MODEL = os.environ.get("WINGMAN_ASSIST_MODEL", "gpt-5.4-mini")
 AGENT_MODEL = os.environ.get("WINGMAN_AGENT_MODEL", "gpt-5.4-mini")
 
 

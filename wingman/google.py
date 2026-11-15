@@ -190,6 +190,28 @@ async def mail_send(to: str, subject: str, body: str) -> None:
         raise RuntimeError(f"Gmail did not send it ({sent.status_code}). {detail}")
 
 
+async def email_of(name: str) -> str:
+    """The email address of someone the owner knows, from their contacts or, failing that, from
+    mail they have exchanged. Empty when it cannot be found."""
+    wanted = name.strip().lower()
+    if not wanted:
+        return ""
+    people = await contacts()
+    exact = [c for c in people if c.get("email") and c["name"].lower() == wanted]
+    close = [c for c in people if c.get("email") and (wanted in c["name"].lower() or c["name"].lower().split()[0] == wanted.split()[0])]
+    if exact or len(close) == 1:
+        return (exact or close)[0]["email"]
+    if can_read_mail():
+        try:
+            for mail in await mail_search(f'from:"{name}"', limit=3):
+                match = re.search(r"<([^>]+@[^>]+)>", mail["from"]) or re.search(r"([\w.+-]+@[\w.-]+)", mail["from"])
+                if match and wanted.split()[0] in mail["from"].lower():
+                    return match.group(1)
+        except RuntimeError:
+            pass
+    return ""
+
+
 async def find_event(title: str, near_ms: float | None = None) -> dict | None:
     """The upcoming event the owner most likely means by these words."""
     skip = {"the", "a", "an", "my", "with", "meeting", "call", "event", "at", "on", "for", "to", "and", "of"}
@@ -242,8 +264,10 @@ async def cancel_event(event: dict) -> bool:
     return await _change("DELETE", event["id"])
 
 
-async def create_event(title: str, start_ms: float, minutes: int = 30, where: str = "") -> dict | None:
-    """Adds an event to the owner's main calendar. Returns it, or None if Google refused."""
+async def create_event(title: str, start_ms: float, minutes: int = 30, where: str = "",
+                       guests: list[str] | None = None) -> dict | None:
+    """Adds an event to the owner's main calendar. Returns it, or None if Google refused.
+    Guests (email addresses) are invited: Google sends each of them the invitation."""
     token = await _access_token()
     if token is None:
         return None
@@ -254,9 +278,12 @@ async def create_event(title: str, start_ms: float, minutes: int = 30, where: st
             "description": "Added by Wingman at your request."}
     if where:
         body["location"] = where
+    if guests:
+        body["attendees"] = [{"email": email} for email in guests]
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post("https://www.googleapis.com/calendar/v3/calendars/primary/events",
+                                         params={"sendUpdates": "all"} if guests else None,
                                          json=body, headers={"Authorization": f"Bearer {token}"})
     except httpx.HTTPError:
         return None
@@ -480,7 +507,7 @@ async def contacts() -> list[dict]:
     """Names and where they work, so a name can be supplied even if never spoken."""
     async def load():
         data = await _get("https://people.googleapis.com/v1/people/me/connections", {
-            "personFields": "names,organizations", "pageSize": "400", "sortOrder": "LAST_MODIFIED_DESCENDING",
+            "personFields": "names,organizations,emailAddresses", "pageSize": "400", "sortOrder": "LAST_MODIFIED_DESCENDING",
         })
         out = []
         for person in (data or {}).get("connections", []):
@@ -489,7 +516,8 @@ async def contacts() -> list[dict]:
                 continue
             org = (person.get("organizations") or [{}])[0]
             about = ", ".join(part for part in (org.get("title"), org.get("name")) if part)
-            out.append({"name": name, "about": about})
+            email = ((person.get("emailAddresses") or [{}])[0].get("value") or "").strip()
+            out.append({"name": name, "about": about, "email": email})
         return out
     if connected():
         return await _cached("contacts", 1800, load)

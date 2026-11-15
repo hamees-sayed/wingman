@@ -34,6 +34,40 @@ This source has never been compiled: it was written on a Mac without Xcode and o
 6. Plug in an iPhone running iOS 17 or later, pick it as the run destination, and press **Run**.
    Use a real device: the simulator has no useful microphone or Bluetooth route.
 
+## Install without Xcode
+
+You don't need Xcode on your own Mac. GitHub Actions (`.github/workflows/ios.yml`) builds the
+app on every push to `ios/`:
+
+- **Wingman-ipa**: an unsigned `Wingman.ipa` for a real iPhone
+- **Wingman-simulator**: `Wingman-sim.tar.gz`, a simulator build for Revyl
+
+Download the ipa from the latest run (**Actions › iOS build**, or
+`gh run download -n Wingman-ipa`) and install it with [Sideloadly](https://sideloadly.io):
+
+1. Plug in the iPhone, unlock it, and tap **Trust** when it asks.
+2. In Sideloadly, pick the **iPhone** in the iDevice list, not your Mac. On an Apple Silicon
+   Mac, choosing the Mac installs the app into `/Applications` instead.
+3. Drop in `Wingman.ipa`, enter your Apple ID, click **Start**, and approve the two-factor code.
+4. On the phone, go to **Settings › General › VPN & Device Management**, open your Apple ID, and tap
+   **Trust**. Then turn on **Settings › Privacy & Security › Developer Mode** and restart.
+
+With a free Apple ID the app stops opening after 7 days. Run Sideloadly again to renew it.
+
+## Testing on Revyl
+
+[Revyl](https://revyl.com) runs the simulator build on cloud iPhones:
+
+```sh
+revyl auth login
+revyl build upload --file Wingman-sim.tar.gz --app <revyl-app-id> --platform ios
+revyl device start --platform ios --app <revyl-app-id> --build-version-id <build-id>
+revyl device instruction "Open Settings › Server, enter the address and key, tap Save and test"
+```
+
+The simulator has no microphone, so the voice-sample step of onboarding can't finish there.
+Test listening on a real phone.
+
 ## The server address and key
 
 Both live in `Wingman/Config.swift`:

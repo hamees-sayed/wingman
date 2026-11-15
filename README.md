@@ -110,7 +110,11 @@ cd android && ./gradlew assembleDebug
 ```
 
 The APK lands in `android/app/build/outputs/apk/debug/`. The server also serves the last
-build at `/app.apk?k=<WINGMAN_KEY>`, which is the easy way to get it onto a phone.
+build at `/app.apk?k=<WINGMAN_KEY>`, which is the easy way to get it onto a phone. The full
+guide is in [android/README.md](android/README.md).
+
+The iPhone app is in `ios/`. CI builds it, and you can sideload it without Xcode; see
+[ios/README.md](ios/README.md).
 
 ### 3. Connections
 
@@ -124,6 +128,20 @@ Each is optional and is set up once, on the server side:
 | Supermemory | An API key | Search by meaning. Without it Wingman falls back to word search. |
 
 ### 4. Hosting
+
+For a fresh Ubuntu 24.04 machine (an EC2 `t3.medium` with ports 22, 80 and 443 open is enough),
+`scripts/ec2-setup.sh` installs everything in one go. It sets up a local Convex backend (the
+`convex` service on `127.0.0.1:3210`), the `wingman` service, and Caddy, which serves https and
+fetches its own certificate. Use an Elastic IP, and the free `sslip.io` name for it as the domain:
+
+```sh
+ssh ubuntu@52.43.194.6 'sh -s' -- 52-43-194-6.sslip.io < scripts/ec2-setup.sh
+scp .env ubuntu@52.43.194.6:wingman/.env   # with PUBLIC_URL=https://52-43-194-6.sslip.io and CONVEX_URL=http://127.0.0.1:3210
+WINGMAN_HOST=ubuntu@52.43.194.6 WINGMAN_SSH_KEY=~/.ssh/your-key.pem scripts/deploy.sh
+```
+
+The phone apps then use `52-43-194-6.sslip.io` as the server address. The Convex data lives on
+the machine under `~/.convex`, so back it up before you terminate the instance.
 
 `scripts/deploy.sh` copies the code and the latest APK to a machine and restarts the
 service there (`WINGMAN_HOST=user@host`). It expects a systemd unit called `wingman`

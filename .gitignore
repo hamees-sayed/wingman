@@ -20,3 +20,4 @@ models/
 ios/Wingman.xcodeproj/
 ios/Wingman/Info.plist
 ios/build/
+.revyl/

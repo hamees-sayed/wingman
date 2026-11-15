@@ -469,6 +469,10 @@ class Session:
                         self.answered.add(cue.key)
                         if cue is self.pending:
                             self.pending = None
+            if line.who != "you" and line.person_id is None and (brain.called(line.text) or ""):
+                # Said to Wingman by name, by a voice that is nobody it knows: on the owner's own
+                # phone that is the owner, whose voice was not recognised this time.
+                line.who, line.label = "you", "You"
             if line.who == "unknown" and brain.called(line.text) == "" and line.end - line.start < 1.5:
                 # Just the name, too short to tell whose voice it is: taken as the owner calling.
                 line.who, line.addressed = "you", True

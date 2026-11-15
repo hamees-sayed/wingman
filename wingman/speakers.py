@@ -25,6 +25,12 @@ SAME_VOICE_SHORT = 0.38  # for clips under SHORT_SECONDS, against people already
 SHORT_SECONDS = 1.5
 MIN_SECONDS = 0.35  # below this a clip says too little about the voice
 LEARN_FROM = 0.62  # only confident matches refine a voiceprint
+# The owner is the voice heard most and the one whose words are acted on, and their match
+# against enrolment swings widely on a phone (measured 0.39 to 0.59 minutes after enrolling).
+# Other real voices score under 0.1 against them. So a clip that resembles the owner this
+# much is the owner, unless a person known by name fits it better.
+OWNER_FLOOR = 0.30
+OWNER_OVER_UNNAMED = 0.20  # an unnamed voice must beat the owner by this much to be someone else
 
 
 @dataclass
@@ -107,6 +113,18 @@ class Roster:
         best_score, best = scored[0] if scored else (0.0, None)
         short = seconds < SHORT_SECONDS
         print(f"voice: {seconds:.1f}s " + ", ".join(f"{sp.label}={sc:.2f}" for sc, sp in scored[:4]), flush=True)
+        owner = next(((sc, sp) for sc, sp in scored if sp.key == "owner"), None)
+        if owner is not None and owner[1] is not best and owner[0] >= OWNER_FLOOR:
+            # An unnamed "Speaker 2" is often the owner's own voice from one bad clip.
+            named = best.person_id is not None
+            if (named and best_score - owner[0] < 0.05) or (not named and best_score - owner[0] < OWNER_OVER_UNNAMED):
+                best_score, best = owner
+        if best is not None and best.key == "owner" and best_score >= OWNER_FLOOR:
+            best.session_seconds += seconds
+            if best_score >= LEARN_FROM and not short:
+                best.total = best.total + vector * seconds
+                best.seconds += seconds
+            return best, best_score
         if best is not None and best_score >= (SAME_VOICE_SHORT if short else SAME_VOICE):
             # A short clip must also clearly prefer this voice over the runner-up.
             if not short or len(scored) < 2 or best_score - scored[1][0] >= 0.08:

@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+data/
+artifacts/
+.uv-cache/
+node_modules/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+.DS_Store
+models/

@@ -135,12 +135,15 @@ For a fresh Ubuntu 24.04 machine (an EC2 `t3.medium` with ports 22, 80 and 443 o
 fetches its own certificate. Use an Elastic IP, and the free `sslip.io` name for it as the domain:
 
 ```sh
-ssh ubuntu@52.43.194.6 'sh -s' -- 52-43-194-6.sslip.io < scripts/ec2-setup.sh
+ssh ubuntu@52.43.194.6 'sh -s' -- 52-43-194-6.sslip.io America/Los_Angeles < scripts/ec2-setup.sh
 scp .env ubuntu@52.43.194.6:wingman/.env   # with PUBLIC_URL=https://52-43-194-6.sslip.io and CONVEX_URL=http://127.0.0.1:3210
 WINGMAN_HOST=ubuntu@52.43.194.6 WINGMAN_SSH_KEY=~/.ssh/your-key.pem scripts/deploy.sh
 ```
 
-The phone apps then use `52-43-194-6.sslip.io` as the server address. The Convex data lives on
+The second argument sets the machine's time zone. The server reads times like "remind me at
+4 pm" off its own clock, so give it the time zone of the people using it. On a machine left at
+UTC, a 4 pm reminder from California fires at 8 am. The phone apps then use
+`52-43-194-6.sslip.io` as the server address. The Convex data lives on
 the machine under `~/.convex`, so back it up before you terminate the instance.
 
 `scripts/deploy.sh` copies the code and the latest APK to a machine and restarts the

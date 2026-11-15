@@ -2,12 +2,16 @@
 # One-time setup of a fresh Ubuntu 24.04 machine (an EC2 t3.medium is enough) to host Wingman:
 # a local Convex backend, the Wingman server, and Caddy in front for https.
 #
-#   ssh ubuntu@HOST 'sh -s' < scripts/ec2-setup.sh DOMAIN
+#   ssh ubuntu@HOST 'sh -s' -- DOMAIN TIMEZONE < scripts/ec2-setup.sh
 #
 # DOMAIN is the name the phones use, e.g. 52-43-194-6.sslip.io for the address 52.43.194.6.
+# TIMEZONE is where the people using it live, e.g. America/Los_Angeles: the server reads
+# "4 pm", "today" and quiet hours off the machine's clock, so a UTC machine moves every time.
 # Run scripts/deploy.sh afterwards to copy the code, the models and .env across.
 set -eu
-DOMAIN="${1:?usage: ec2-setup.sh DOMAIN}"
+DOMAIN="${1:?usage: ec2-setup.sh DOMAIN TIMEZONE}"
+TIMEZONE="${2:?usage: ec2-setup.sh DOMAIN TIMEZONE}"
+sudo timedatectl set-timezone "$TIMEZONE"
 ARCH=x86_64
 [ "$(uname -m)" = aarch64 ] && ARCH=aarch64
 

@@ -184,7 +184,40 @@ async def people_lookup_tool(store: Store, args: dict[str, Any]) -> ToolResult:
     lines = []
     for person in hits[:10]:
         about = str(person.get("about") or "").strip()
-        lines.append(f"- {person['name']}" + (f": {_clip(about, 140)}" if about else ""))
+        lines.append(f"- {person['name']}" + (f": {_clip(about, 200)}" if about else ""))
+        if not person.get("_id"):
+            continue
+        # Everything Wingman holds on them: when the owner spoke with them, what it was
+        # about, and what stands between them.
+        try:
+            page = await store.query("people:profile", id=person["_id"])
+        except StoreError:
+            page = None
+        if not page:
+            continue
+        for promise in page.get("owe") or []:
+            lines.append(f"    the owner owes them: {_clip(promise.get('what') or '', 120)}")
+        for promise in page.get("owed") or []:
+            lines.append(f"    they owe the owner: {_clip(promise.get('what') or '', 120)}")
+        # The conversations they were part of, fullest first: a one-line exchange about them
+        # says less than the conversation the owner actually had with them.
+        talks = sorted(page.get("conversations") or [], key=lambda talk: -len(talk.get("lines") or []))
+        for position, talk in enumerate(talks[:3]):
+            when = datetime.fromtimestamp(talk["startedAt"] / 1000).strftime("%a %d %b %H:%M")
+            lines.append(f"    Conversation with them, \"{talk.get('title')}\" ({when}): {_clip(talk.get('summary') or '', 400)}")
+            said = talk.get("lines") or []
+            name = str(person["name"]).lower().split()[0]
+            keep = set()
+            for index, line in enumerate(said):
+                if name in line["text"].lower():
+                    keep.update(range(max(0, index - 4), min(len(said), index + 5)))
+            if position == 0:  # and how the fullest one went
+                keep.update(range(min(len(said), 25)))
+            for index in sorted(keep)[:45]:
+                lines.append(f"      [{said[index]['label']}] {_clip(said[index]['text'], 160)}")
+        if talks:
+            lines.append("    (These are conversations this person took part in or was named in. Speakers who were "
+                         "never named appear as \"Speaker N\"; one of them may be this person.)")
     return _one("\n".join(lines))
 
 
@@ -359,6 +392,22 @@ async def research_start_tool(store: Store, args: dict[str, Any]) -> ToolResult:
     question = str(args.get("question") or "").strip()
     if not question:
         return _one("Please provide the research question.")
+    # Research runs in the background and is announced later, which is the wrong answer to a
+    # simple question. It only starts when the owner asked for it in so many words.
+    if not _RESEARCH.search(heard.get()):
+        return _one("Answer the owner's question yourself, now and briefly, from what you know or from the other "
+                    "tools. Do not mention research, searching or this tool in your answer.")
+    # The owner's own people, meetings and conversations are in Wingman, not on the web.
+    asked = f"{heard.get()} {question}"
+    try:
+        names = {str(p["name"]).lower().split()[0] for p in await store.query("people:list")
+                 if not p.get("isOwner") and len(str(p["name"]).split()[0]) >= 3}
+    except StoreError:
+        names = set()
+    if _OWN_LIFE.search(asked) or names & set(re.findall(r"[a-z]+", asked.lower())):
+        return _one("Not a web question: this is about the owner's own people, meetings or conversations. Look it "
+                    "up with people_lookup, recent_conversations, conversations_search, calendar_events or "
+                    "memory_search, then answer. Do not mention research.")
     return await _act(store, {"action": "research", "what": question})
 
 
@@ -381,6 +430,11 @@ async def slack_import_todos_tool(store: Store, args: dict[str, Any]) -> ToolRes
 
 heard: contextvars.ContextVar[str] = contextvars.ContextVar("heard", default="")  # the owner's current words
 _pending = users.Scoped(dict)  # the one message waiting for a yes, per account
+_RESEARCH = re.compile(r"\b(research|look into|look up|find out|dig into|investigate|deep dive|"
+                       r"search (the web|online|the internet)|google)\b", re.I)
+_OWN_LIFE = re.compile(
+    r"\b(my|our|we|i)\b[^.?!]{0,60}\b(meetings?|conversations?|chats?|calls?|calendar|schedule|promis\w*|to-?dos?|"
+    r"tasks?|said|talked|spoke|discussed|met|agreed|notes?)\b|\b(who is|who's|who was)\b", re.I)
 _YES = re.compile(r"\b(yes|yeah|yep|yup|sure|send( it| that)?|go ahead|do it|please do|okay|ok|confirm(ed)?)\b", re.I)
 _NO = re.compile(r"\b(no|nope|don't|do not|cancel|wait|stop|hold on|not yet|change)\b", re.I)
 
@@ -485,7 +539,7 @@ def registry() -> dict[str, Tool]:
         "todo_list": Tool("todo_list", "Read the owner's open to-do list.", _params(), todo_list_tool),
         "promises_list": Tool("promises_list", "Read open promises between the owner and others.",
                                _params(), promises_list_tool),
-        "people_lookup": Tool("people_lookup", "Look up a person the owner knows.",
+        "people_lookup": Tool("people_lookup", "Look up a person the owner knows: who they are, the conversations the owner had with them and what those were about, what was said around their name, and what is owed either way.",
                                _params(["name"], name={"type": "string"}), people_lookup_tool),
         "conversations_search": Tool("conversations_search", "Search the words spoken in the owner's past conversations by keyword; returns matching lines with who said them.",
                                       _params(["query"], query={"type": "string"}), conversations_search_tool),
@@ -515,7 +569,7 @@ def registry() -> dict[str, Tool]:
             ["title"], title={"type": "string"}), calendar_cancel_tool),
         "note_save": Tool("note_save", "Keep a note for the owner (also written to their Notion when connected). Not for things to do: use todo_add for those.",
                           _params(["text"], text={"type": "string"}), note_save_tool),
-        "research_start": Tool("research_start", "Start web research in the background on a full question. It takes a minute or two and is announced when ready; do not wait for it.", _params(
+        "research_start": Tool("research_start", "Start web research in the background. ONLY when the owner asks for research in so many words (research, look into, look up, find out, dig into). It takes a minute or two and is announced when ready. Never for a simple question: answer those directly.", _params(
             ["question"], question={"type": "string"}), research_start_tool),
         "slack_import_todos": Tool("slack_import_todos", "Read the owner's recent Slack messages, work out what they need to do, and add those to the to-do list. Returns the to-dos it added. Use this when asked to pick up, pull or import tasks from Slack.",
                                     _params(), slack_import_todos_tool),
@@ -572,7 +626,8 @@ def filler(calls: list[tuple[str, str]]) -> str | None:
     if not reading:
         return None
     who = next((_topic(arguments) for name, arguments in reading if name == "people_lookup"), "")
-    if who:
+    generic = {"today", "recent", "meeting", "meetings", "people", "everyone", "anyone", "me", "my", "who", "yesterday"}
+    if who and len(who.split()) <= 3 and not set(who.lower().split()) & generic:  # an actual name
         return f"Looking up {who}."
     if all(name == "research_results" for name, _ in reading):
         return "Pulling up the research."

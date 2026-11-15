@@ -343,6 +343,16 @@ async def _sweep_slack(force: bool = False):
     asyncio.create_task(sweep())
 
 
+async def _said(line: str):
+    """What Wingman says unprompted goes into the chat history too, so "yes, tell me" straight
+    after it is understood as an answer to it."""
+    try:
+        await store().mutation("chats:add", role="wingman", text=line)
+        agent._ready.set(None)
+    except StoreError:
+        pass
+
+
 async def _announce():
     """For the account in force: speak any reminder that is due and any research that has
     finished, and now and then check in."""
@@ -359,6 +369,7 @@ async def _announce():
         ok = study["status"] == "ready"
         line = (f"Your research on {study['topic']} is ready. Ask me for the short version."
                 if ok else f"I could not finish the research on {study['topic']}.")
+        await _said(line)
         for live_session in mine():
             await live_session.emit({"type": "research", "id": study["_id"], "topic": study["topic"], "ok": ok})
             live_session.say(line, key=f"research:{study['_id']}")

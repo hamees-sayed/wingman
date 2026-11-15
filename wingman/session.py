@@ -263,6 +263,7 @@ class Session:
             pass
         summary = await brain.recap(self.lines, known)
         todos = summary.pop("todos", [])
+        await self._describe_people(summary.pop("people", []))
         await self.store.mutation("conversations:end", id=self.conversation, **summary)
         await self.emit({"type": done, "conversation": self.conversation, **summary})
         await self._suggest(todos)
@@ -275,6 +276,27 @@ class Session:
             profile.schedule(self.store, "Conversations", "A conversation the owner (labelled You) just had:\n"
                              + brain.transcript(self.lines, 120))
         return summary
+
+    async def _describe_people(self, people: list[dict]):
+        """With the whole conversation in view, write down who each named person is and what
+        they said or wanted, so "who is Michael?" has an answer later. What is already known
+        about someone is kept and added to, not replaced."""
+        owner = next((p["name"].lower() for p in self.people if p.get("isOwner")), "")
+        for person in people:
+            name, about = person["name"], person["about"]
+            if not about or name.lower() in (owner, "you", "wingman") or name.lower().startswith("speaker "):
+                continue
+            known = next((p for p in self.people if p["name"].lower() == name.lower()), None)
+            before = (known or {}).get("about") or ""
+            if about.lower() in before.lower():
+                continue
+            try:
+                person_id = await self.store.mutation("people:upsert", name=name,
+                                                      about=f"{before}; {about}"[:400] if before else about[:400])
+                if person_id:
+                    await self.store.mutation("conversations:addPerson", id=self.conversation, personId=person_id)
+            except StoreError:
+                continue
 
     def _draft_follow_ups(self):
         """Each promise the owner made in this conversation gets its follow-up message written
@@ -976,7 +998,18 @@ class Session:
                              "due": promise.get("due") or ""})
 
         # A line spoken to Wingman was already answered, and acted on, by the agent.
-        requests = [] if any(line.addressed for line in batch) else notes.get("requests")
+        requests = [] if any(line.addressed for line in batch) else (notes.get("requests") or [])
+        # A question put to Wingman without its name ("can you tell me who Michael is?") is a
+        # question for the agent, which can look through memory, people and conversations. It
+        # is not a web search to be started and announced later.
+        asked = [r for r in requests if r.get("action") in ("ask", "research")]
+        requests = [r for r in requests if r.get("action") not in ("ask", "research")]
+        if asked:
+            said = next((line for line in reversed(batch) if line.who == "you"), None)
+            if said is not None:
+                said.addressed = True
+                self.spoken_end = said.end
+                self._converse(said.text)
         done = await actions.carry_out(self.store, requests, self.conversation)
         for task in done:
             await self.emit({"type": "task", **{k: v for k, v in task.items() if k != "clash"}})

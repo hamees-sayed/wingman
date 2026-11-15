@@ -110,6 +110,16 @@ export const forgetVoice = mutation({
   },
 });
 
+// Set, or with nothing given clear, what is written about a person.
+export const setAbout = mutation({
+  args: { id: v.id("people"), about: v.optional(v.string()), ...userArg },
+  handler: async (ctx, { id, about, userId }) => {
+    const person = await ctx.db.get(id);
+    if (!person || !mine(person, who(userId))) return;
+    await ctx.db.patch(id, { about: about || undefined });
+  },
+});
+
 export const remove = mutation({
   args: { id: v.id("people"), ...userArg },
   handler: async (ctx, { id, userId }) => {

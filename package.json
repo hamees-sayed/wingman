@@ -1,0 +1,10 @@
+{
+  "name": "wingman",
+  "private": true,
+  "scripts": {
+    "convex": "convex dev"
+  },
+  "dependencies": {
+    "convex": "^1.50.0"
+  }
+}

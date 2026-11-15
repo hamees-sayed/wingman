@@ -1,0 +1,52 @@
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate project
+        working-directory: ios
+        run: |
+          brew install xcodegen
+          xcodegen
+
+      - name: Build unsigned app
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project Wingman.xcodeproj \
+            -scheme Wingman \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee build.log | xcbeautify --renderer github-actions
+          test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Package ipa
+        working-directory: ios
+        run: |
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Wingman.app Payload/
+          zip -qr Wingman.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Wingman-ipa
+          path: ios/Wingman.ipa
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: ios/build.log

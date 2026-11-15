@@ -428,6 +428,7 @@ class Session:
         await self._maybe_rejoin(runs)
         new = []
         for run in runs:
+            run.speaker.last_heard = self.now
             echoed = sum(max(0.0, min(run.end, b) - max(run.start, a)) for a, b in self.spoke[-6:])
             if run.speaker.who != "you" and echoed > 0.5 * max(0.2, run.end - run.start):
                 continue  # that was Wingman itself, heard through a loudspeaker
@@ -454,8 +455,10 @@ class Session:
     def _on_lines(self, new: list[Line], already: bool):
         self.lines.extend(new)
         self.trail = self.asked = None
+        # Present means heard in the last three minutes, not at any point in the conversation:
+        # people leave, and a reminder about someone who has gone is noise.
         present = {s.person_id for s in self.roster.speakers.values()
-                   if s.person_id and s.session_seconds > 0}
+                   if s.person_id and s.session_seconds > 0 and self.now - getattr(s, "last_heard", -1e9) <= 180}
         for line in new:
             if GOODBYE.search(line.text):
                 self.goodbye_at = line.start

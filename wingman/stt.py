@@ -77,7 +77,7 @@ class PulseStream:
     def __init__(self, eou_timeout_ms: int = 350, diarize: bool = False):
         params = {
             "model": config.STT_MODEL,
-            "language": os.environ.get("STT_LANGUAGE", "en"),  # "multi" also hears Hindi, at some cost to English
+            "language": os.environ.get("STT_LANGUAGE") or "en",  # "multi" also hears Hindi, at some cost to English
             "encoding": "linear16",
             "sample_rate": str(config.SAMPLE_RATE),
             "word_timestamps": "true",

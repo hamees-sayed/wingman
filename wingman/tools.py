@@ -356,6 +356,32 @@ async def todo_remove_tool(store: Store, args: dict[str, Any]) -> ToolResult:
     return await _act(store, {"action": "drop", "what": text})
 
 
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+async def _known_email(store: Store, name: str) -> str:
+    """An email address Wingman itself holds for this person: said in a conversation, written
+    in what is known about them, or kept as a fact ("Harris's email is ...")."""
+    first = name.strip().lower().split()[0] if name.strip() else ""
+    if not first:
+        return ""
+    try:
+        people, facts = await store.query("people:list"), await store.query("memories:list")
+    except StoreError:
+        return ""
+    for person in people:
+        if first in str(person.get("name") or "").lower():
+            found = _EMAIL.search(str(person.get("about") or ""))
+            if found:
+                return found.group(0).rstrip(".")
+    for fact in facts:
+        if first in fact["text"].lower():
+            found = _EMAIL.search(fact["text"])
+            if found:
+                return found.group(0).rstrip(".")
+    return ""
+
+
 async def calendar_create_tool(store: Store, args: dict[str, Any]) -> ToolResult:
     title = str(args.get("title") or "").strip().rstrip(".")
     when = str(args.get("when") or "").strip()
@@ -368,7 +394,7 @@ async def calendar_create_tool(store: Store, args: dict[str, Any]) -> ToolResult
         guest = str(guest).strip()
         if not guest:
             continue
-        email = guest if "@" in guest else await google.email_of(guest)
+        email = guest if "@" in guest else (await _known_email(store, guest) or await google.email_of(guest))
         (emails if email else missing).append(email or guest)
     if (emails or missing) and not google.can_book():
         return _one("Google Calendar is not connected, so no invitation can be sent.")

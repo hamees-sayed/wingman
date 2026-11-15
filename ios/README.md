@@ -38,7 +38,7 @@ This source has never been compiled: it was written on a Mac without Xcode and o
 
 Both live in `Wingman/Config.swift`:
 
-- `defaultHost` is `whale-yea-vcr-think.trycloudflare.com`. A public name is reached over https; an
+- `defaultHost` is `wingman.example.com` (a placeholder: set your own). A public name is reached over https; an
   address with a port, such as `192.168.1.20:8787`, over plain http on the local network.
 - `defaultKey` is the placeholder `PUT_WINGMAN_KEY_HERE`. Replace it with the server's
   `WINGMAN_KEY` before building, or leave it and type the key on the phone.

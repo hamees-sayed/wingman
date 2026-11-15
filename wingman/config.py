@@ -22,6 +22,9 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 GATE_MODEL = os.environ.get("WINGMAN_GATE_MODEL", "gpt-6-luna")
 THINK_MODEL = os.environ.get("WINGMAN_THINK_MODEL", "gpt-6-luna")
+# The agent the owner talks to: measured faster to its first word than the model above, and it
+# does not reach for a tool when a plain answer will do.
+AGENT_MODEL = os.environ.get("WINGMAN_AGENT_MODEL", "gpt-5.4-mini")
 
 
 def require(name: str) -> str:

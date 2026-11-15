@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wingman</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #ffffff; --ink: #1c1b18; --quiet: #6f6a60; --line: #e4dfd4;
+    --accent: #1f6f5c; --accent-soft: #dcefe9; --you: #2a4b8d; --warn: #a3541a; --warn-soft: #f6e7d8;
+    --bad: #a02c2c; --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141412; --card: #1e1d1a; --ink: #ecebe6; --quiet: #9a958a; --line: #32302b;
+      --accent: #5cc4a8; --accent-soft: #1d3a33; --you: #8fb0f0; --warn: #e0a063; --warn-soft: #3a2a1a; --bad: #e07b7b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .app { max-width: 720px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 18px 16px 10px; display: flex; align-items: center; gap: 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; flex: 1; }
+  .pill { font-size: 12px; padding: 4px 10px; border-radius: 99px; background: var(--line); color: var(--quiet); }
+  .pill.on { background: var(--accent-soft); color: var(--accent); }
+  .pill.whisper { background: var(--accent); color: #fff; }
+  nav { display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav button { background: none; border: 0; padding: 10px 12px; color: var(--quiet); font: inherit;
+    border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+  nav button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  main { flex: 1; padding: 14px 16px 120px; }
+  section { display: none; } section.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+  .muted { color: var(--quiet); } .small { font-size: 13px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--quiet); margin: 18px 0 8px; font-weight: 600; }
+  .line { display: grid; grid-template-columns: 84px 1fr; gap: 10px; padding: 5px 0; }
+  .who { font-size: 12px; font-weight: 600; color: var(--quiet); padding-top: 2px; text-align: right;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who.you { color: var(--you); } .who.other { color: var(--accent); }
+  .interim { color: var(--quiet); font-style: italic; }
+  .chip { margin: 6px 0 6px 94px; padding: 9px 12px; border-radius: 12px; font-size: 14px; display: flex; gap: 10px; align-items: center; }
+  .chip .t { flex: 1; } .chip .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .75; display: block; }
+  .chip.spoken { background: var(--accent); color: #fff; }
+  .chip.card { background: var(--accent-soft); color: var(--ink); border: 1px dashed var(--accent); }
+  .chip.quiet { background: none; border: 1px dashed var(--line); color: var(--quiet); font-size: 12.5px; padding: 6px 10px; }
+  .chip.promise { background: var(--warn-soft); color: var(--ink); }
+  .chip.cut { opacity: .6; text-decoration: line-through; }
+  .thumbs button { background: none; border: 0; cursor: pointer; font-size: 16px; opacity: .55; padding: 2px 4px; color: inherit; }
+  .thumbs button.sel { opacity: 1; transform: scale(1.15); }
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, var(--bg) 30%); padding: 26px 16px 16px; }
+  .dock .in { max-width: 688px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+  .listen { border: 0; border-radius: 99px; padding: 14px 22px; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: #fff; min-width: 120px; }
+  .listen.on { background: var(--bad); }
+  .listen:disabled { opacity: .5; cursor: default; }
+  input[type=text], select { flex: 1; min-width: 0; padding: 12px 14px; border-radius: 99px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); font: inherit; }
+  button.plain { padding: 9px 14px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; cursor: pointer; }
+  button.danger { color: var(--bad); border-color: var(--bad); }
+  .row { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  .row label { flex: 1; min-width: 180px; }
+  .item { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); }
+  .item:first-child { border-top: 0; } .item .b { flex: 1; }
+  .item.done .b { text-decoration: line-through; color: var(--quiet); }
+  .tag { font-size: 11px; padding: 2px 7px; border-radius: 99px; background: var(--line); color: var(--quiet); margin-left: 6px; }
+  .banner { background: var(--warn-soft); color: var(--warn); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; }
+  .err { color: var(--bad); font-size: 13px; margin: 6px 0; }
+  .meter { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 8px; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Wingman</h1>
+    <span class="pill" id="state">Paused</span>
+  </header>
+  <nav id="tabs">
+    <button data-tab="live" class="active">Live</button>
+    <button data-tab="recap">Recap</button>
+    <button data-tab="promises">Promises</button>
+    <button data-tab="people">People</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  <main>
+    <section id="live" class="active">
+      <div class="banner" id="enrolBanner" hidden>Wingman does not know your voice yet, so it cannot tell you from anyone else. Record a voice sample in Settings first.</div>
+      <div id="errors"></div>
+      <div id="transcript"><p class="muted" id="empty">Tap Listen. Wingman stays silent unless you get stuck on a name or a fact, or a promise you made comes up.</p></div>
+      <div class="line" id="interimRow" hidden><span class="who"></span><span class="interim" id="interim"></span></div>
+    </section>
+
+    <section id="recap">
+      <div class="row"><select id="conversationPick"></select><button class="plain danger" id="deleteConversation">Delete</button></div>
+      <div id="recapBody"><p class="muted">No conversations yet.</p></div>
+    </section>
+
+    <section id="promises"><div id="promiseList"><p class="muted">No promises caught yet.</p></div></section>
+    <section id="people"><div id="peopleList"><p class="muted">Nobody yet. People appear here once they are named in a conversation.</p></div></section>
+
+    <section id="settings">
+      <h2>Your voice</h2>
+      <div class="card">
+        <p class="small muted" id="enrolState">Checking…</p>
+        <p class="small">Read this aloud for ten seconds, in your normal voice: <em>“This is my normal speaking voice. I am reading a few sentences so that Wingman can learn how I sound and tell me apart from other people in a conversation.”</em></p>
+        <div class="row"><input type="text" id="enrolName" placeholder="Your name" value=""><button class="plain" id="enrolBtn">Record 10 s</button></div>
+        <div class="meter"><i id="enrolMeter"></i></div>
+      </div>
+      <h2>How readily it speaks</h2>
+      <div class="card">
+        <div class="row"><label>Eagerness<br><span class="small muted">Quiet needs more confidence and leaves two minutes between whispers; Normal leaves one.</span></label>
+          <select id="eagerness" style="flex:0 0 130px"><option value="normal">Normal</option><option value="quiet">Quiet</option></select></div>
+        <div class="row"><label>Demo setting<br><span class="small muted">Eight seconds between whispers and no back-off, so a short demo can show several.</span></label>
+          <input type="checkbox" id="demo" style="width:22px;height:22px"></div>
+      </div>
+      <h2>Your data</h2>
+      <div class="card">
+        <p class="small muted">Wingman keeps text only, never audio. Voiceprints are kept for you and for people once they are named.</p>
+        <button class="plain danger" id="wipe">Delete everything</button> <span class="small muted" id="wipeResult"></span>
+      </div>
+    </section>
+  </main>
+  <div class="dock"><div class="in">
+    <button class="listen" id="listen">Listen</button>
+    <input type="text" id="askText" placeholder="Ask Wingman…" disabled>
+    <button class="plain" id="askBtn" disabled>Ask</button>
+  </div></div>
+</div>
+
+<script src="https://unpkg.com/convex@1.50.0/dist/browser.bundle.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const api = (path, options) => fetch(path, options && { ...options, headers: {"Content-Type": "application/json"} }).then((r) => r.json());
+const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body ?? {}) });
+
+let ws, audioContext, micStream, micNode, listening = false, enrolling = false, playing = null, db = null, hearing = false;
+const RATE = 16000;
+
+// --- Tabs ---------------------------------------------------------------------------------
+$("tabs").addEventListener("click", (e) => {
+  const tab = e.target.dataset.tab; if (!tab) return;
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === e.target));
+  document.querySelectorAll("section").forEach((s) => s.classList.toggle("active", s.id === tab));
+});
+
+// --- Microphone: mono 16 kHz PCM16, 100 ms at a time ---------------------------------------
+const WORKLET = `class Tap extends AudioWorkletProcessor {
+  // Captures at the device's own rate and resamples to 16 kHz by averaging, 100 ms a message.
+  constructor() { super(); this.buf = new Int16Array(1600); this.n = 0; this.step = sampleRate / 16000; this.pos = 0; this.sum = 0; this.count = 0; }
+  process(inputs) { const ch = inputs[0][0]; if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.sum += ch[i]; this.count++; this.pos += 1;
+      if (this.pos >= this.step) { this.pos -= this.step;
+        const s = Math.max(-1, Math.min(1, this.sum / this.count)); this.sum = 0; this.count = 0;
+        this.buf[this.n++] = s < 0 ? s * 32768 : s * 32767;
+        if (this.n === this.buf.length) { this.port.postMessage(this.buf.slice(0)); this.n = 0; } } }
+    return true; } }
+registerProcessor("tap", Tap);`;
+
+async function openMic() {
+  if (!audioContext) {
+    audioContext = new AudioContext();
+    await audioContext.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
+  }
+  await audioContext.resume();
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  const source = audioContext.createMediaStreamSource(micStream);
+  micNode = new AudioWorkletNode(audioContext, "tap");
+  micNode.port.onmessage = (e) => { if (ws && ws.readyState === 1 && (listening || enrolling)) ws.send(e.data.buffer); };
+  source.connect(micNode);
+  // The browser only runs audio nodes that lead to the output, so route the tap there, muted.
+  const mute = audioContext.createGain(); mute.gain.value = 0;
+  micNode.connect(mute); mute.connect(audioContext.destination);
+}
+function closeMic() {
+  if (micStream) micStream.getTracks().forEach((t) => t.stop());
+  if (micNode) micNode.disconnect();
+  micStream = micNode = null;
+}
+
+// --- Whisper playback ---------------------------------------------------------------------
+function play(event) {
+  const bytes = Uint8Array.from(atob(event.pcm), (c) => c.charCodeAt(0));
+  const pcm = new Int16Array(bytes.buffer, 0, bytes.length >> 1);
+  const buffer = audioContext.createBuffer(1, pcm.length, event.sampleRate);
+  const out = buffer.getChannelData(0);
+  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
+  const source = audioContext.createBufferSource();
+  source.buffer = buffer; source.connect(audioContext.destination);
+  source.onended = () => { if (playing === source) { playing = null; setState(); } };
+  playing = source; source.start(); setState();
+}
+function stopPlaying() { if (playing) { try { playing.stop(); } catch {} playing = null; setState(); } }
+
+// --- Live ---------------------------------------------------------------------------------
+function setState(text) {
+  const pill = $("state");
+  pill.className = "pill" + (playing ? " whisper" : listening ? " on" : "");
+  pill.textContent = text || (playing ? "Whispering" : listening ? (hearing ? "Hearing speech" : "Listening") : "Paused");
+  $("listen").textContent = listening ? "Pause" : "Listen";
+  $("listen").classList.toggle("on", listening);
+  $("askText").disabled = $("askBtn").disabled = !listening;
+}
+function atBottom() { return window.innerHeight + window.scrollY >= document.body.scrollHeight - 140; }
+function add(html) {
+  const stick = atBottom(); $("empty")?.remove();
+  $("transcript").insertAdjacentHTML("beforeend", html);
+  if (stick) window.scrollTo(0, document.body.scrollHeight);
+}
+function whisperChip(w) {
+  const thumbs = w.id ? `<span class="thumbs" data-id="${esc(w.id)}"><button data-g="up" title="Useful">👍</button><button data-g="down" title="Not wanted">👎</button></span>` : "";
+  if (w.outcome === "spoken" || w.outcome === "cut")
+    return `<div class="chip spoken ${w.outcome === "cut" ? "cut" : ""}" id="w-${esc(w.id)}"><span class="t"><span class="k">Whispered · ${esc(w.kind)}${w.latency != null ? " · " + w.latency.toFixed(1) + " s" : ""}</span>${esc(w.text)}</span>${thumbs}</div>`;
+  if (w.outcome === "card")
+    return `<div class="chip card"><span class="t"><span class="k">Shown, not spoken · ${esc(w.kind)}</span>${esc(w.text)}<br><span class="small muted">${esc(w.why)}</span></span>${thumbs}</div>`;
+  const label = { declined: "Stayed silent: nothing reliable to say", stale: "Stayed silent: the moment passed", held: "Held back" }[w.outcome] || w.outcome;
+  return `<div class="chip quiet"><span class="t">${esc(label)}${w.text ? " · “" + esc(w.text) + "”" : ""}</span></div>`;
+}
+function handle(event) {
+  switch (event.type) {
+    case "started": listening = true; setState(); $("transcript").innerHTML = ""; $("enrolBanner").hidden = event.ownerEnrolled; break;
+    case "speech": hearing = event.speaking; setState(); break;
+    case "interim": $("interimRow").hidden = false; $("interim").textContent = event.text; break;
+    case "line":
+      $("interimRow").hidden = true;
+      add(`<div class="line"><span class="who ${esc(event.who)}" data-label="${esc(event.label)}">${esc(event.label)}</span><span>${esc(event.text)}</span></div>`); break;
+    case "relabel":
+      document.querySelectorAll(`.who[data-label="${CSS.escape(event.from)}"]`).forEach((n) => { n.textContent = event.to; n.dataset.label = event.to; n.className = "who other"; }); break;
+    case "whisper": add(whisperChip(event)); break;
+    case "audio": play(event); break;
+    case "stop_audio": stopPlaying(); document.getElementById("w-" + event.id)?.classList.add("cut"); break;
+    case "promise":
+      add(`<div class="chip promise"><span class="t"><span class="k">Promise noted · no sound</span>${event.by === "you" ? "You owe " + esc(event.person) : esc(event.person) + " owes you"} ${esc(event.what)}${event.due ? " · " + esc(event.due) : ""}</span></div>`); break;
+    case "person": break;
+    case "ending": setState("Writing recap…"); break;
+    case "ended": listening = false; closeMic(); setState(); if (event.conversation) add(`<div class="chip card"><span class="t"><span class="k">Recap ready</span>${esc(event.title || "")}<br><span class="small">${esc(event.summary || "")}</span></span></div>`); refreshLists(); break;
+    case "enrolled": enrolDone(event); break;
+    case "error": $("errors").insertAdjacentHTML("beforeend", `<div class="err">${esc(event.message)}</div>`); break;
+  }
+}
+function connect() {
+  return new Promise((resolve, reject) => {
+    if (ws && ws.readyState === 1) return resolve();
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = resolve; ws.onerror = reject;
+    ws.onmessage = (m) => handle(JSON.parse(m.data));
+    ws.onclose = () => { if (listening) { listening = false; closeMic(); setState("Disconnected"); } };
+  });
+}
+$("listen").onclick = async () => {
+  $("listen").disabled = true; $("errors").innerHTML = "";
+  try {
+    if (!listening) { await connect(); await openMic(); ws.send(JSON.stringify({ type: "start" })); }
+    else { ws.send(JSON.stringify({ type: "stop" })); stopPlaying(); }
+  } catch (error) { $("errors").innerHTML = `<div class="err">${esc(error.message || "Could not open the microphone or reach the server.")}</div>`; }
+  $("listen").disabled = false;
+};
+function ask() { const text = $("askText").value.trim(); if (text && listening) { ws.send(JSON.stringify({ type: "ask", text })); add(`<div class="line"><span class="who you">You, typed</span><span>${esc(text)}</span></div>`); $("askText").value = ""; } }
+$("askBtn").onclick = ask; $("askText").onkeydown = (e) => { if (e.key === "Enter") ask(); };
+document.addEventListener("click", (e) => {
+  const button = e.target.closest(".thumbs button"); if (!button) return;
+  const box = button.parentElement, selected = button.classList.contains("sel");
+  box.querySelectorAll("button").forEach((b) => b.classList.remove("sel"));
+  if (!selected) button.classList.add("sel");
+  post(`/api/whispers/${box.dataset.id}/grade`, { grade: selected ? null : button.dataset.g });
+});
+
+// --- Voice sample -------------------------------------------------------------------------
+$("enrolBtn").onclick = async () => {
+  if (listening || enrolling) return;
+  try { await connect(); await openMic(); } catch (error) { $("enrolState").textContent = "Could not open the microphone."; return; }
+  enrolling = true; $("enrolBtn").disabled = true; $("enrolState").textContent = "Recording… keep reading.";
+  ws.send(JSON.stringify({ type: "enroll_start", name: $("enrolName").value.trim() || "Me" }));
+  const began = Date.now();
+  const timer = setInterval(() => { $("enrolMeter").style.width = Math.min(100, (Date.now() - began) / 100) + "%"; }, 100);
+  setTimeout(() => { clearInterval(timer); enrolling = false; ws.send(JSON.stringify({ type: "enroll_stop" })); closeMic(); }, 10000);
+};
+function enrolDone(event) {
+  $("enrolBtn").disabled = false; $("enrolMeter").style.width = "0";
+  $("enrolState").textContent = event.ok ? `Voice sample saved (${event.seconds.toFixed(0)} s). Wingman will label your lines “You”.` : event.message;
+  if (event.ok) $("enrolBanner").hidden = true;
+}
+
+// --- Recap, Promises, People: read live from Convex, with the server as a fallback ---------
+let recapId = null, unsubscribeRecap = null;
+function renderConversations(list) {
+  const pick = $("conversationPick");
+  pick.innerHTML = list.map((c) => `<option value="${c._id}">${esc(c.title || "Conversation")} · ${new Date(c.startedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</option>`).join("");
+  if (!list.length) { recapId = null; $("recapBody").innerHTML = '<p class="muted">No conversations yet.</p>'; return; }
+  if (!list.some((c) => c._id === recapId)) recapId = list[0]._id;
+  pick.value = recapId; watchRecap();
+}
+function watchRecap() {
+  if (unsubscribeRecap) unsubscribeRecap();
+  if (!recapId) return;
+  if (db) unsubscribeRecap = db.onUpdate("conversations:recap", { id: recapId }, renderRecap);
+  else api(`/api/recap/${recapId}`).then(renderRecap);
+}
+$("conversationPick").onchange = (e) => { recapId = e.target.value; watchRecap(); };
+$("deleteConversation").onclick = async () => { if (recapId && confirm("Delete this conversation and everything Wingman took from it?")) { await fetch(`/api/conversations/${recapId}`, { method: "DELETE" }); recapId = null; refreshLists(); } };
+function renderRecap(r) {
+  if (!r) return;
+  const c = r.conversation, spoken = r.whispers.filter((w) => w.outcome === "spoken" || w.outcome === "cut"), held = r.whispers.filter((w) => !spoken.includes(w));
+  const promise = (p) => `<div class="item ${p.status === "done" ? "done" : ""}"><input type="checkbox" data-promise="${p._id}" ${p.status === "done" ? "checked" : ""}><span class="b">${p.by === "you" ? "You owe " + esc(p.person) : esc(p.person) + " owes you"} ${esc(p.what)}${p.due ? `<span class="tag">${esc(p.due)}</span>` : ""}</span></div>`;
+  $("recapBody").innerHTML = `
+    <div class="card"><strong>${esc(c.title || (c.endedAt ? "Conversation" : "In progress"))}</strong><p>${esc(c.summary || (c.endedAt ? "" : "The recap is written when you pause."))}</p>
+      <p class="small muted">${r.people.length ? "With " + r.people.map((p) => esc(p.name)).join(", ") : "Nobody named"}</p></div>
+    <h2>Promises caught</h2><div class="card">${r.promises.map(promise).join("") || '<span class="muted">None.</span>'}</div>
+    <h2>Whispers</h2><div class="card">${spoken.map((w) => `<div class="item"><span class="b"><strong>${esc(w.text)}</strong><span class="tag">${esc(w.kind)}</span>${w.outcome === "cut" ? '<span class="tag">you spoke over it</span>' : ""}<br><span class="small muted">${esc(w.why)}${w.latencyMs != null ? " · " + (w.latencyMs / 1000).toFixed(1) + " s" : ""}</span></span><span class="thumbs" data-id="${w._id}"><button data-g="up" class="${w.grade === "up" ? "sel" : ""}">👍</button><button data-g="down" class="${w.grade === "down" ? "sel" : ""}">👎</button></span></div>`).join("") || '<span class="muted">None spoken.</span>'}</div>
+    <h2>Held back</h2><div class="card">${held.map((w) => `<div class="item"><span class="b">${w.text ? esc(w.text) : '<span class="muted">Nothing reliable to say</span>'}<span class="tag">${esc(w.outcome)}</span><br><span class="small muted">${esc(w.why)}</span></span></div>`).join("") || '<span class="muted">Nothing.</span>'}</div>`;
+}
+function renderPromises(list) {
+  $("promiseList").innerHTML = list.length ? `<div class="card">${list.map((p) => `<div class="item ${p.status === "done" ? "done" : ""}"><input type="checkbox" data-promise="${p._id}" ${p.status === "done" ? "checked" : ""}><span class="b">${p.by === "you" ? "You owe " + esc(p.person) : esc(p.person) + " owes you"} ${esc(p.what)}${p.due ? `<span class="tag">${esc(p.due)}</span>` : ""}<br><span class="small muted">${new Date(p.createdAt).toLocaleDateString([], { dateStyle: "medium" })}</span></span></div>`).join("")}</div>` : '<p class="muted">No promises caught yet.</p>';
+}
+document.addEventListener("change", async (e) => {
+  const id = e.target.dataset?.promise; if (!id) return;
+  await post(`/api/promises/${id}`, { status: e.target.checked ? "done" : "open" }); if (!db) refreshLists();
+});
+function renderPeople(list) {
+  const others = list.filter((p) => !p.isOwner);
+  $("peopleList").innerHTML = others.length ? `<div class="card">${others.map((p) => `<div class="item"><span class="b"><strong>${esc(p.name)}</strong>${p.hasVoice ? '<span class="tag">voice known</span>' : ""}<br><span class="small muted">${esc(p.about || "")}${p.about ? " · " : ""}last heard ${new Date(p.lastMet).toLocaleDateString([], { dateStyle: "medium" })}</span></span><button class="plain small" data-person="${p._id}">Forget</button></div>`).join("")}</div>` : '<p class="muted">Nobody yet. People appear here once they are named in a conversation.</p>';
+}
+document.addEventListener("click", async (e) => { const id = e.target.dataset?.person; if (id) { await fetch(`/api/people/${id}`, { method: "DELETE" }); if (!db) refreshLists(); } });
+async function refreshLists() {
+  if (db) return; // live queries keep these fresh
+  renderConversations(await api("/api/conversations")); renderPromises(await api("/api/promises")); renderPeople(await api("/api/people"));
+}
+
+// --- Settings -----------------------------------------------------------------------------
+async function loadState() {
+  const state = await api("/api/state");
+  $("eagerness").value = state.settings.eagerness; $("demo").checked = state.settings.demo;
+  $("enrolBanner").hidden = state.ownerEnrolled;
+  $("enrolState").textContent = state.ownerEnrolled ? `Voice sample on file for ${state.ownerName}. Record again to replace it.` : "No voice sample yet.";
+  if (state.ownerName && state.ownerName !== "Me") $("enrolName").value = state.ownerName;
+}
+$("eagerness").onchange = (e) => post("/api/settings", { eagerness: e.target.value });
+$("demo").onchange = (e) => post("/api/settings", { demo: e.target.checked });
+$("wipe").onclick = async () => { if (!confirm("Delete every conversation, promise, person and voiceprint?")) return; const r = await post("/api/wipe"); $("wipeResult").textContent = "Deleted: " + Object.entries(r).map(([k, v]) => `${v} ${k}`).join(", "); loadState(); refreshLists(); };
+
+(async () => {
+  try {
+    const cfg = await api("/config");
+    if (window.convex) {
+      db = new convex.ConvexClient(cfg.convexUrl);
+      db.onUpdate("conversations:list", {}, renderConversations);
+      db.onUpdate("promises:all", {}, renderPromises);
+      db.onUpdate("people:list", {}, renderPeople);
+    }
+  } catch { db = null; }
+  await loadState(); refreshLists(); setState();
+})();
+</script>
+</body>
+</html>

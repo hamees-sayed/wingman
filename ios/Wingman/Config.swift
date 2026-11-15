@@ -4,7 +4,7 @@ import Foundation
 /// typed there is kept in UserDefaults and wins over the defaults below.
 enum Config {
     /// The server's address: a public name (reached over https) or an IP and port (plain http).
-    static let defaultHost = "whale-yea-vcr-think.trycloudflare.com"
+    static let defaultHost = "wingman.example.com"  // your server; can be changed in Settings
 
     /// Sent as `X-Wingman-Key` with every request. Replace this with the server's WINGMAN_KEY
     /// before building, or type the key into Settings on the phone.

@@ -1,0 +1,8 @@
+# Copy to android/local.properties (never committed) and fill in.
+sdk.dir=/path/to/Android/sdk
+# The same value as WINGMAN_KEY in the server's .env.
+wingman.key=
+# The server's address without https://, e.g. wingman.example.com (or 192.168.1.20:8787 on a home network).
+wingman.server=
+# The Google Cloud OAuth *web* client id (ends in .apps.googleusercontent.com), for in-app Google sign-in.
+wingman.googleClient=

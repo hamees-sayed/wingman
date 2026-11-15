@@ -492,6 +492,35 @@ private fun ColumnScope.MemoryStep(next: () -> Unit) {
 }
 
 @Composable
+private fun WhisperBanner(modifier: Modifier = Modifier) {
+    val flash = Hub.flash
+    LaunchedEffect(flash) { if (flash != null) { delay(8000); if (Hub.flash === flash) Hub.flash = null } }
+    androidx.compose.animation.AnimatedVisibility(
+        visible = flash != null, modifier = modifier,
+        enter = androidx.compose.animation.slideInVertically { -it } + fadeIn(),
+        exit = androidx.compose.animation.slideOutVertically { -it } + fadeOut(),
+    ) {
+        val (kind, text) = flash?.let { it.first to it.second } ?: ("" to "")
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp)).night()
+            .clickable { Hub.flash = null }.padding(horizontal = 20.dp, vertical = 18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Wave(0.7f, true, Color(0xFF9DB1FF), Modifier.width(34.dp).height(16.dp), bars = 7)
+                Spacer(Modifier.width(10.dp))
+                Label(when (kind) {
+                    "name", "fact" -> "Whispered in your ear"
+                    "nudge" -> "Nudge in your ear"
+                    "explain" -> "Explained in your ear"
+                    "brief" -> "Who this is"
+                    "promise" -> "Reminder in your ear"
+                    else -> "Wingman"
+                }, Color(0xFF9DB1FF))
+            }
+            Display(text, 24.sp, Color.White, italic = true, modifier = Modifier.padding(top = 10.dp))
+        }
+    }
+}
+
+@Composable
 private fun Next(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().height(60.dp).clip(RoundedCornerShape(30.dp)).background(if (enabled) Color.White else Color(0x33FFFFFF))
@@ -612,6 +641,9 @@ private fun App(redoOnboarding: () -> Unit) {
             Tab(Icons.Outlined.Checklist, "Promises", screen == Screen.Promises) { screen = Screen.Promises }
             Tab(Icons.Outlined.Groups, "People", screen == Screen.People) { screen = Screen.People }
         }
+        // Whatever Wingman has just whispered is also shown for a few seconds, on every screen:
+        // the earbud is private, so this is the only way anyone else sees it happen.
+        WhisperBanner(Modifier.align(Alignment.TopCenter).statusBarsPadding())
     }
 
     draft?.let { (person, message) ->

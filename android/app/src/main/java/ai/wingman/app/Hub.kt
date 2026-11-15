@@ -58,6 +58,8 @@ object Hub {
     var shared by mutableStateOf<Pair<String, String>?>(null) // source and text shared in from another app
     var talking by mutableStateOf(false) // the talk button is held
     var thinking by mutableStateOf(false) // the agent is working on an answer
+    /** What Wingman has just said in the owner's ear: its kind, the words, and when. Shown on screen for a few seconds. */
+    var flash by mutableStateOf<Triple<String, String, Long>?>(null)
 
     private val main = Handler(Looper.getMainLooper())
     fun onMain(block: () -> Unit) = main.post(block)
@@ -83,7 +85,10 @@ object Hub {
                     if (entry is Entry.Line && entry.label == from) entries[index] = entry.copy(who = "other", label = to)
                 }
             }
-            "whisper" -> { refresh++; entries += Entry.Whisper(
+            "whisper" -> { refresh++
+                if (event.optString("outcome") == "spoken" && event.optString("text").isNotEmpty())
+                    flash = Triple(event.optString("kind"), event.optString("text"), System.currentTimeMillis())
+                entries += Entry.Whisper(
                 event.optString("id").ifEmpty { null }.takeIf { !event.isNull("id") },
                 event.optString("kind"), event.optString("text"), event.optString("why"),
                 event.optString("outcome"),

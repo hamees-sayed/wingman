@@ -129,7 +129,7 @@ class Session:
         self.offset = 0.0  # added to line times when this session continues an earlier conversation
         self.goodbye_at = -1.0  # when someone last said goodbye
         self.previous: dict | None = None  # the conversation that just closed, in case it carries on
-        self.spoke: list[tuple[float, float]] = []  # when Wingman's own voice was playing
+        self.spoke: list[tuple[float, float, set]] = []  # when Wingman's own voice was playing, and its words
         self.peak = 0  # loudest sample so far, to notice a dead microphone
         self.warned_silent = False
 
@@ -421,18 +421,10 @@ class Session:
             self.speech_began = now
         if speaking:
             self.last_speech = now
-        stopped = self.speaking and not speaking
         if speaking != self.speaking:
             self.speaking = speaking
             await self.emit({"type": "speech", "speaking": speaking})
         await self.stream.send(pcm)
-        if stopped:
-            # Someone just stopped talking: ask for their words now, not after the speech
-            # service has waited to be sure. Everything downstream starts that much sooner.
-            try:
-                await self.stream.finalize()
-            except Exception:  # noqa: BLE001 - the words still arrive the usual way
-                pass
         await self._tick()
 
     def clip(self, start: float, end: float) -> bytes:
@@ -498,9 +490,14 @@ class Session:
                 task = asyncio.create_task(self._greet(who))
                 self.tasks.add(task)
                 task.add_done_callback(self.tasks.discard)
-            echoed = sum(max(0.0, min(run.end, b) - max(run.start, a)) for a, b in self.spoke[-6:])
+            echoed = sum(max(0.0, min(run.end, b) - max(run.start, a)) for a, b, _ in self.spoke[-6:])
             if run.speaker.who != "you" and echoed > 0.5 * max(0.2, run.end - run.start):
-                continue  # that was Wingman itself, heard through a loudspeaker
+                # Overlapping Wingman's own speech is not enough to call it an echo: someone may
+                # simply have been talking at the same time. It is an echo when the words match.
+                heard = set(re.findall(r"[a-z0-9]+", run.text.lower()))
+                said = set().union(*[words for a, b, words in self.spoke[-6:] if min(run.end, b) > max(run.start, a)] or [set()])
+                if heard and len(heard & said) >= 0.5 * len(heard):
+                    continue  # that was Wingman itself, heard through a loudspeaker
             line = Line(who=run.speaker.who, label=run.speaker.label, text=run.text,
                         start=run.start + self.offset, end=run.end + self.offset,
                         person_id=run.speaker.person_id)
@@ -940,7 +937,7 @@ class Session:
             length = len(pcm) / 2 / RATE
             expected = length + (len(rest) * 0.065 if rest else 0.0)  # a guess until the rest is made
             self.playing = (whisper_id, candidate, now, now + expected)
-            self.spoke.append((now, now + expected + 0.4))
+            self.spoke.append((now, now + expected + 0.4, set(re.findall(r"[a-z0-9]+", candidate.text.lower()))))
             if candidate.prompted:
                 self.engaged_until = now + expected + 20.0
             await self.emit({"type": "audio", "id": whisper_id, "pcm": pcm, "kind": candidate.kind,
@@ -972,7 +969,7 @@ class Session:
         now = self.now
         until = now + len(pcm) / 2 / RATE
         self.playing = (whisper_id, candidate, playing[2], until)
-        self.spoke.append((now, until + 0.4))
+        self.spoke.append((now, until + 0.4, set(re.findall(r"[a-z0-9]+", candidate.text.lower()))))
         if candidate.prompted:
             self.engaged_until = until + 20.0
         await self.emit({"type": "audio", "id": whisper_id, "pcm": pcm, "kind": candidate.kind, "text": rest})

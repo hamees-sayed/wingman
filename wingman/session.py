@@ -670,7 +670,8 @@ class Session:
                 waiting = asyncio.create_task(later())
                 self.tasks.add(waiting)
                 waiting.add_done_callback(self.tasks.discard)
-            answer = await agent.chat(self.store, request, progress, confirmed)
+            answer = await agent.chat(self.store, request, progress, confirmed,
+                                      room=brain.transcript([l for l in self.lines if not l.addressed], 12))
             answered = True
             for task in answer.get("done") or []:
                 await self.emit({"type": "task", **{k: v for k, v in task.items() if k != "clash"}})

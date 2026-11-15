@@ -57,6 +57,10 @@ owe the owner, then what was left open last time.
 ahead" or similar, read research_results and give the short version.
 - If the chat so far ends with a question you asked the owner, their message is the answer: \
 acknowledge it in one short, warm sentence and do not ask another question.
+- "Send an invite", "invite him", "set up a meeting with her" mean a calendar event with \
+that person as a guest (calendar_create with guests), never a drafted message.
+- An email address may be spoken ("daniel dot reyes at acme dot com"): write it as an \
+address (daniel.reyes@acme.com) when you pass it to a tool.
 - To message or email someone: call message_draft, then read the draft aloud and ask "Send \
 it?". Only when the owner's next message says yes, call message_send. Never send without \
 that yes, and never claim it was sent unless message_send said so.
@@ -179,7 +183,8 @@ def _after_actions(done: list[dict]) -> tuple[str, list[str]]:
     return " ".join(line(item) for item in done), []
 
 
-async def chat(store: Store, text: str, progress=None, confirmed: asyncio.Event | None = None) -> dict:
+async def chat(store: Store, text: str, progress=None, confirmed: asyncio.Event | None = None,
+               room: str = "") -> dict:
     """`progress`, when given, is called with a short line saying what Wingman is doing
     ("Searching Slack for voice samples.") each time it goes to look something up, so a spoken
     question is not met with silence.
@@ -198,7 +203,11 @@ async def chat(store: Store, text: str, progress=None, confirmed: asyncio.Event 
             return {"reply": f"I could not reach my memory just now. ({error})", "steps": [], "sources": [], "done": []}
         messages: list[dict] = [
             {"role": "system", "content": AGENT % datetime.now().astimezone().strftime("%A %Y-%m-%d %H:%M %Z")},
-            {"role": "user", "content": _chat_prompt(text, about, history, todo)},
+            {"role": "user", "content": (
+                # What is being said around the owner right now: "send him an invite" only makes
+                # sense knowing who was just speaking and what was agreed.
+                f"The conversation the owner is in right now (they are 'You'):\n{room}\n\n" if room else "")
+                + _chat_prompt(text, about, history, todo)},
         ]
         specs = tools.specs()
         spoke, last_line = 0, ""

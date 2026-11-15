@@ -807,7 +807,8 @@ private fun HomeScreen(go: (Screen) -> Unit, drafting: (JSONObject) -> Unit, ope
                     }
                 }
                 Wave(Hub.level, Hub.listening, Color.White, Modifier.padding(top = 18.dp, bottom = 16.dp).fillMaxWidth().height(54.dp))
-                Display(
+                // Room for two lines whatever it says, so the card does not jump as the state changes.
+                Box(Modifier.fillMaxWidth().height(72.dp), contentAlignment = Alignment.CenterStart) { Display(
                     when {
                         !Hub.listening && Hub.status.startsWith("Listening on") -> "Your other device is listening. Tap play to listen here instead."
                         !Hub.listening -> "Paused. Tap play and it picks up where it left off."
@@ -815,7 +816,7 @@ private fun HomeScreen(go: (Screen) -> Unit, drafting: (JSONObject) -> Unit, ope
                         (now?.optInt("lines") ?: 0) > 0 -> "Following along. It speaks only if you get stuck."
                         Hub.hearing -> "Someone is speaking. Following along."
                         else -> "Quiet for now."
-                    }, 27.sp, Color.White)
+                    }, 27.sp, Color.White, maxLines = 2) }
                 val last = now?.optString("lastLine").orEmpty()
                 if (Hub.listening && last.isNotEmpty()) Body("“$last”", 14.sp, NightText, modifier = Modifier.padding(top = 10.dp), maxLines = 2)
             }

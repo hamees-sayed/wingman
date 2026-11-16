@@ -113,6 +113,7 @@ class Session:
         self.assisting = False
         self.known_at_start: set[str] = set()  # voices Wingman already knew when this conversation began
         self.greeted: set[str] = set()  # returning people the owner has been briefed on
+        self.owner_last = 0.0  # when the owner last spoke in this conversation
         self.held: list[Line] = []  # lines heard before the owner had taken part
         self.discarded = False  # ended without the owner taking part, and was not kept
         self.warmed = -100.0
@@ -160,7 +161,7 @@ class Session:
             "continued": continued,  # always-on rolled into a new conversation: keep the screen
         })
 
-    def continue_from(self, earlier: "Session"):
+    def continue_from(self, earlier: "Session", rejoin: bool = True):
         """Always-on rolled over from `earlier`. Keep its voices, so "Speaker 2" stays the same
         person, and remember it in case the same people speak again soon."""
         for key, speaker in earlier.roster.speakers.items():
@@ -168,8 +169,8 @@ class Session:
                 speaker.session_seconds = 0.0
                 self.roster.speakers[key] = speaker
         self.roster.next_anon = max(self.roster.next_anon, earlier.roster.next_anon)
-        if earlier.discarded:
-            return  # there is no earlier conversation to carry on
+        if earlier.discarded or not rejoin:
+            return  # there is no earlier conversation to carry on, or its owner had left it
         self.previous = {
             "conversation": earlier.conversation, "closed": time.time(),
             "length": earlier.now + earlier.offset,
@@ -214,6 +215,12 @@ class Session:
     def idle(self) -> float:
         """Seconds since anyone spoke."""
         return self.now - self.last_speech
+
+    @property
+    def owner_quiet(self) -> float:
+        """Seconds since the owner last said anything here. Other people talking on does not make
+        it the owner's conversation: when the owner has been out of it this long, theirs is over."""
+        return self.now - self.owner_last
 
     @property
     def busy(self) -> bool:
@@ -526,6 +533,8 @@ class Session:
         present = {s.person_id for s in self.roster.speakers.values()
                    if s.person_id and s.session_seconds > 0 and self.now - getattr(s, "last_heard", -1e9) <= 180}
         for line in new:
+            if line.who == "you" or line.maybe_you:
+                self.owner_last = self.now
             if GOODBYE.search(line.text):
                 self.goodbye_at = line.start
             pending = self.pending
@@ -542,6 +551,7 @@ class Session:
                 # Said to Wingman by name, by a voice that is nobody it knows: on the owner's own
                 # phone that is the owner, whose voice was not recognised this time.
                 line.who, line.label = "you", "You"
+                self.owner_last = self.now
             if line.who == "unknown" and brain.called(line.text) == "" and line.end - line.start < 1.5:
                 # Just the name, too short to tell whose voice it is: taken as the owner calling.
                 line.who, line.addressed = "you", True

@@ -762,6 +762,10 @@ async def clear_chats():
 ROLL_AFTER_GOODBYE = 8.0  # after "bye" or "talk later", this much silence is enough
 ROLL_AFTER = 75.0
 ROLL_AFTER_DEMO = 20.0
+# Silence is not the only ending. In a room where people keep talking there is never a silence,
+# so a conversation is also over once its owner has said nothing in it for this long.
+OWNER_GONE = 150.0
+OWNER_GONE_DEMO = 60.0
 
 
 # --- Live ----------------------------------------------------------------------------------
@@ -812,9 +816,13 @@ async def live(socket: WebSocket):
                         limit = min(limit, ROLL_AFTER_GOODBYE)  # the conversation was wrapped up
                     if session.ended:
                         session = None
-                    elif session.lines and session.idle > limit and not session.busy:
-                        # Always on: a long silence ends this conversation; its recap is
-                        # written in the background while a fresh one starts listening.
+                    elif session.lines and not session.busy and (
+                            session.idle > limit
+                            or session.owner_quiet > (OWNER_GONE_DEMO if session.governor.demo else OWNER_GONE)):
+                        # Always on: a long silence, or the owner dropping out of it, ends this
+                        # conversation; its recap is written in the background while a fresh
+                        # one starts listening. If the same people carry on, the two are rejoined.
+                        left = session.idle <= limit  # still talk in the room: the owner dropped out
                         finished, session = session, Session(
                             store(), emit, embedder(), eagerness=session.governor.eagerness,
                             demo=session.governor.demo)
@@ -823,7 +831,7 @@ async def live(socket: WebSocket):
                         closing.add_done_callback(background.discard)
                         try:
                             await session.start(continued=True)
-                            session.continue_from(finished)
+                            session.continue_from(finished, rejoin=not left)
                         except Exception as error:  # noqa: BLE001
                             session = None
                             await emit({"type": "error", "message": f"Could not continue: {error}"})

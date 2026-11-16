@@ -116,6 +116,13 @@ guide is in [android/README.md](android/README.md).
 The iPhone app is in `ios/`. CI builds it, and you can sideload it without Xcode; see
 [ios/README.md](ios/README.md).
 
+The server also serves a **web app** at its address (`web/`). It's an installable PWA: open it
+on a phone and choose **Add to Home Screen**. With `WINGMAN_PUBLIC_APP=1` the server hands it out
+with the key already filled in, so anyone with the address can use it without setup. Each
+browser gets its own account. Without that setting, open it as `https://<server>/?k=<WINGMAN_KEY>`
+once and the key is remembered. A browser stops listening when the screen locks, so use the
+native apps for all-day listening.
+
 ### 3. Connections
 
 Each is optional and is set up once, on the server side:

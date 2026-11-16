@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Wingman</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#3A4DEB">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Wingman">
 <style>
   :root {
     --bg: #f6f4ef; --card: #ffffff; --ink: #1c1b18; --quiet: #6f6a60; --line: #e4dfd4;
@@ -130,7 +137,20 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const api = (path, options) => fetch(path, options && { ...options, headers: {"Content-Type": "application/json"} }).then((r) => r.json());
+// The server fills in the key when it hands out the public web app; otherwise ?k= in the address
+// works, and is remembered. Each browser makes its own account token, as each phone install does.
+function remembered(name, make) {
+  let value = "";
+  try { value = localStorage.getItem(name) || ""; } catch {}
+  if (!value && make) { value = make(); try { localStorage.setItem(name, value); } catch {} }
+  return value;
+}
+const KEY = "__WINGMAN_KEY__" || new URLSearchParams(location.search).get("k") || remembered("wingman.key");
+if (KEY) { try { localStorage.setItem("wingman.key", KEY); } catch {} }
+const USER = remembered("wingman.user", () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join(""));
+const HEADERS = { "X-Wingman-Key": KEY, "X-Wingman-User": USER };
+const call = (path, options = {}) => fetch(path, { ...options, headers: { ...HEADERS, ...(options.body ? { "Content-Type": "application/json" } : {}) } });
+const api = (path, options) => call(path, options).then((r) => r.json());
 const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body ?? {}) });
 
 let ws, audioContext, micStream, micNode, listening = false, enrolling = false, playing = null, db = null, hearing = false;
@@ -241,7 +261,8 @@ function handle(event) {
 function connect() {
   return new Promise((resolve, reject) => {
     if (ws && ws.readyState === 1) return resolve();
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+    // A browser cannot set headers on a WebSocket, so the key and account ride in the address.
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?k=${encodeURIComponent(KEY)}&u=${USER}`);
     ws.binaryType = "arraybuffer";
     ws.onopen = resolve; ws.onerror = reject;
     ws.onmessage = (m) => handle(JSON.parse(m.data));
@@ -298,7 +319,7 @@ function watchRecap() {
   else api(`/api/recap/${recapId}`).then(renderRecap);
 }
 $("conversationPick").onchange = (e) => { recapId = e.target.value; watchRecap(); };
-$("deleteConversation").onclick = async () => { if (recapId && confirm("Delete this conversation and everything Wingman took from it?")) { await fetch(`/api/conversations/${recapId}`, { method: "DELETE" }); recapId = null; refreshLists(); } };
+$("deleteConversation").onclick = async () => { if (recapId && confirm("Delete this conversation and everything Wingman took from it?")) { await call(`/api/conversations/${recapId}`, { method: "DELETE" }); recapId = null; refreshLists(); } };
 function renderRecap(r) {
   if (!r) return;
   const c = r.conversation, spoken = r.whispers.filter((w) => w.outcome === "spoken" || w.outcome === "cut"), held = r.whispers.filter((w) => !spoken.includes(w));
@@ -321,7 +342,7 @@ function renderPeople(list) {
   const others = list.filter((p) => !p.isOwner);
   $("peopleList").innerHTML = others.length ? `<div class="card">${others.map((p) => `<div class="item"><span class="b"><strong>${esc(p.name)}</strong>${p.hasVoice ? '<span class="tag">voice known</span>' : ""}<br><span class="small muted">${esc(p.about || "")}${p.about ? " · " : ""}last heard ${new Date(p.lastMet).toLocaleDateString([], { dateStyle: "medium" })}</span></span><button class="plain small" data-person="${p._id}">Forget</button></div>`).join("")}</div>` : '<p class="muted">Nobody yet. People appear here once they are named in a conversation.</p>';
 }
-document.addEventListener("click", async (e) => { const id = e.target.dataset?.person; if (id) { await fetch(`/api/people/${id}`, { method: "DELETE" }); if (!db) refreshLists(); } });
+document.addEventListener("click", async (e) => { const id = e.target.dataset?.person; if (id) { await call(`/api/people/${id}`, { method: "DELETE" }); if (!db) refreshLists(); } });
 async function refreshLists() {
   if (db) return; // live queries keep these fresh
   renderConversations(await api("/api/conversations")); renderPromises(await api("/api/promises")); renderPeople(await api("/api/people"));
@@ -338,6 +359,8 @@ async function loadState() {
 $("eagerness").onchange = (e) => post("/api/settings", { eagerness: e.target.value });
 $("demo").onchange = (e) => post("/api/settings", { demo: e.target.checked });
 $("wipe").onclick = async () => { if (!confirm("Delete every conversation, promise, person and voiceprint?")) return; const r = await post("/api/wipe"); $("wipeResult").textContent = "Deleted: " + Object.entries(r).map(([k, v]) => `${v} ${k}`).join(", "); loadState(); refreshLists(); };
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
 (async () => {
   try {

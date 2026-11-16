@@ -33,6 +33,15 @@ app = FastAPI(title="Wingman")
 # but everything that touches the owner's data has to come from the Wingman app, which sends
 # a key with every request. Requests from this machine or the local network are not checked.
 OPEN_PATHS = ("/oauth/", "/mcp/", "/.well-known/")  # the connector address carries its own token
+# What a browser needs to install the web app. None of it holds data.
+APP_FILES = {"/manifest.webmanifest": "application/manifest+json", "/sw.js": "text/javascript",
+             "/icon-192.png": "image/png", "/icon-512.png": "image/png"}
+
+
+def _public_app() -> bool:
+    """WINGMAN_PUBLIC_APP=1 hands the web app, key included, to anyone who opens the address:
+    each browser gets its own account, but anyone can use the server and its paid keys."""
+    return os.environ.get("WINGMAN_PUBLIC_APP", "") == "1"
 
 
 def _from_outside(headers, client: str = "") -> bool:
@@ -61,7 +70,8 @@ def _has_key(headers, query) -> bool:
 @app.middleware("http")
 async def guard(request: Request, call_next):
     outside = _from_outside(request.headers, request.client.host if request.client else "")
-    open_path = request.url.path.startswith(OPEN_PATHS)
+    open_path = (request.url.path.startswith(OPEN_PATHS) or request.url.path in APP_FILES
+                 or (request.url.path == "/" and _public_app()))
     if outside and not open_path and not _has_key(request.headers, request.query_params):
         return JSONResponse({"detail": "This is a private Wingman server."}, status_code=401)
     # Which account this is. Sign-in returns and connector calls say who they are for themselves.
@@ -98,7 +108,20 @@ def store() -> Store:
 
 @app.get("/")
 async def console():
-    return FileResponse(WEB / "index.html")
+    page = (WEB / "index.html").read_text()
+    # The key goes into the page as it is served, never into the repository.
+    key = os.environ.get("WINGMAN_KEY", "") if _public_app() else ""
+    return HTMLResponse(page.replace("__WINGMAN_KEY__", json.dumps(key)[1:-1]),
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/manifest.webmanifest")
+@app.get("/sw.js")
+@app.get("/icon-192.png")
+@app.get("/icon-512.png")
+async def app_file(request: Request):
+    return FileResponse(WEB / request.url.path.lstrip("/"), media_type=APP_FILES[request.url.path],
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/where")

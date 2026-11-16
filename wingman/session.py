@@ -457,13 +457,8 @@ class Session:
         request = brain.called(event.text)
         if request is not None:
             self._warm()
-        if request is None and self.now < self.engaged_until and len(event.text.split()) >= 3:
-            request = event.text  # carrying on the exchange with Wingman
         if request and len(request.split()) >= 3 and self._owner_is_speaking(event.start, least=0.5):
             self._start_early(request)
-        if (request is None and self.taking_part and len(event.text.split()) >= 7
-                and not self._owner_is_speaking(event.start, least=0.5)):
-            self._maybe_assist(interim=event.text)  # someone else is mid-sentence: start looking now
         utterance = round(event.start, 1)
         kind = brain.stall(event.text)
         if kind and utterance not in self.triggered_utterances and self._owner_is_speaking(event.start):
@@ -503,6 +498,7 @@ class Session:
                         person_id=run.speaker.person_id)
             # Not recognised as anyone, but it resembles the owner: probably the owner on a bad
             # clip. Their requests are honoured; their words are not filed as the owner's.
+            line.sure = run.confidence
             line.maybe_you = (line.who != "you" and line.person_id is None and max(
                 run.owner_score, getattr(run.speaker, "owner_like", 0.0)) >= speakers.OWNER_FLOOR)
             new.append(line)
@@ -579,8 +575,11 @@ class Session:
                     self.spoken_end = line.end
                     self._converse(f"{asking['text']} {line.text}")
                     continue
-                if request is None and self.now < self.engaged_until and len(line.text.split()) >= 2:
-                    request = line.text  # carrying on the exchange with Wingman
+                if (request is None and self.now < self.engaged_until and len(line.text.split()) >= 2
+                        and line.sure >= 0.5):
+                    # Carrying on the exchange with Wingman without saying its name is only for a
+                    # voice it is sure is the owner's: someone else speaking next must not be answered.
+                    request = line.text
                 if request is not None:
                     if re.fullmatch(r"\W*(stop|thanks|thank you|okay|ok|that's all|never mind)\W*", request, re.I):
                         self.engaged_until = -1.0
@@ -939,7 +938,7 @@ class Session:
             self.playing = (whisper_id, candidate, now, now + expected)
             self.spoke.append((now, now + expected + 0.4, set(re.findall(r"[a-z0-9]+", candidate.text.lower()))))
             if candidate.prompted:
-                self.engaged_until = now + expected + 20.0
+                self.engaged_until = now + expected + 12.0
             await self.emit({"type": "audio", "id": whisper_id, "pcm": pcm, "kind": candidate.kind,
                              "text": first})
             if candidate.key.startswith("reply:") and self.asking:
@@ -971,7 +970,7 @@ class Session:
         self.playing = (whisper_id, candidate, playing[2], until)
         self.spoke.append((now, until + 0.4, set(re.findall(r"[a-z0-9]+", candidate.text.lower()))))
         if candidate.prompted:
-            self.engaged_until = until + 20.0
+            self.engaged_until = until + 12.0
         await self.emit({"type": "audio", "id": whisper_id, "pcm": pcm, "kind": candidate.kind, "text": rest})
 
     async def _log(self, candidate: Candidate, outcome: str, latency: float | None = None):
@@ -1033,6 +1032,8 @@ class Session:
             name = str(person["name"]).strip()
             if not name or name.lower() in (owner_name, "you", "wingman"):
                 continue
+            if owner_name and SequenceMatcher(None, name.lower().split()[0], owner_name.split()[0]).ratio() >= 0.75:
+                continue  # the owner's own name, misheard ("Vasim" for Wasim), is not a new person
             about = str(person.get("about") or "").strip() or None
             person_id = await self.store.mutation("people:upsert", name=name, about=about)
             await self.store.mutation("conversations:addPerson", id=self.conversation,

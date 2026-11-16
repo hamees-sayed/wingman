@@ -229,17 +229,14 @@ export const home = query({
         .withIndex("by_conversation", (q) => q.eq("conversationId", live._id))
         .collect();
       // Who the owner is with right now, not everyone who was ever part of this conversation.
-      // Someone is still there while another voice has been heard in the last three minutes;
-      // if their own voice is known, it has to be theirs, or their name has to have been said.
-      const recently = Date.now() - 3 * 60_000;
+      // Someone is shown only while their name has been said, or their own known voice heard,
+      // in the last four minutes. Other voices carrying on is no evidence that they are still
+      // there: showing nobody is better than showing someone who left.
+      const recently = Date.now() - 4 * 60_000;
       const fresh = lines.filter((line) => line.at >= recently);
-      const othersHeard = fresh.some((line) => line.who !== "you");
-      const linked = new Set(lines.map((line) => line.personId).filter(Boolean));
       const here = people.filter((person) => {
         const first = person.name.toLowerCase().split(" ")[0];
-        const named = fresh.some((line) => line.text.toLowerCase().includes(first));
-        if (linked.has(person._id)) return named || fresh.some((line) => line.personId === person._id);
-        return named || othersHeard;
+        return fresh.some((line) => line.personId === person._id || line.text.toLowerCase().includes(first));
       });
       const names = new Set(here.map((p) => p.name.toLowerCase()));
       now = {

@@ -26,6 +26,7 @@ class Line:
     retracted: bool = False
     addressed: bool = False  # said to Wingman, and already answered as such
     maybe_you: bool = False  # an unrecognised voice that resembles the owner's
+    sure: float = 1.0  # how confidently the voice was recognised
 
 
 @dataclass
@@ -216,7 +217,11 @@ the memory: an idiom from a culture or sport that is not theirs, jargon from a f
 not theirs, or a language the memory does not show them using. Or the owner showed they did \
 not follow ("sorry?", "what do you mean").
 
+If someone both used an expression the owner would not know and gave an opening for a \
+nudge, explain the expression: not following is the more urgent problem.
+
 Everything else is "none", and then speak is false. In particular:
+- Something the owner has just said themselves ("I work on speech models") is never nudged.
 - People simply talking: catching up, telling stories, joking, sharing news or opinions, \
 planning something together. A topic the owner also knows about is not a need.
 - The owner is already answering, has answered, or clearly understood.

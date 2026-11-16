@@ -201,14 +201,8 @@ async def email_of(name: str) -> str:
     close = [c for c in people if c.get("email") and (wanted in c["name"].lower() or c["name"].lower().split()[0] == wanted.split()[0])]
     if exact or len(close) == 1:
         return (exact or close)[0]["email"]
-    if can_read_mail():
-        try:
-            for mail in await mail_search(f'from:"{name}"', limit=3):
-                match = re.search(r"<([^>]+@[^>]+)>", mail["from"]) or re.search(r"([\w.+-]+@[\w.-]+)", mail["from"])
-                if match and wanted.split()[0] in mail["from"].lower():
-                    return match.group(1)
-        except RuntimeError:
-            pass
+    # Mail is not searched for an address: the first match for a first name is as likely to be
+    # a notification sent in someone's name as the person themselves.
     return ""
 
 
@@ -258,6 +252,28 @@ async def move_event(event: dict, start_ms: float) -> bool:
     start = datetime.fromtimestamp(start_ms / 1000).astimezone()
     return await _change("PATCH", event["id"], {"start": {"dateTime": start.isoformat()},
                                                 "end": {"dateTime": (start + length).isoformat()}})
+
+
+async def add_guests(event: dict, guests: list[str]) -> bool:
+    """Invites more people to an event that is already on the calendar."""
+    token = await _access_token()
+    if token is None or not event.get("id"):
+        return False
+    url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event['id']}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            current = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if current.status_code != 200:
+                return False
+            have = current.json().get("attendees") or []
+            emails = {a.get("email", "").lower() for a in have}
+            body = {"attendees": have + [{"email": g} for g in guests if g.lower() not in emails]}
+            done = await client.patch(url, params={"sendUpdates": "all"}, json=body,
+                                      headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError:
+        return False
+    _clear_events_cache()
+    return done.status_code == 200
 
 
 async def cancel_event(event: dict) -> bool:

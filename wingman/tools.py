@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from wingman import google, notion, recall, slack, users
-from wingman.actions import carry_out, slack_todos
+from wingman.actions import carry_out, parse_when, slack_todos
 from wingman.actions import confirmation as actions_confirmation
 from wingman.store import Store, StoreError
 
@@ -398,6 +398,24 @@ async def calendar_create_tool(store: Store, args: dict[str, Any]) -> ToolResult
         (emails if email else missing).append(email or guest)
     if (emails or missing) and not google.can_book():
         return _one("Google Calendar is not connected, so no invitation can be sent.")
+    # Asked twice for the same meeting (the second time with the guest's address): the one that
+    # is already there gets the guest, not a twin.
+    due = parse_when(when)
+    existing = await google.find_event(title, near_ms=due) if due and google.can_book() else None
+    if existing is not None:
+        try:
+            same_time = abs(datetime.fromisoformat(existing["start"]).timestamp() * 1000 - due) < 5 * 60_000
+        except (ValueError, TypeError):
+            same_time = False
+        if same_time:
+            if not emails:
+                return _one(f"{existing['title']} is already on the calendar at that time; nothing was added."
+                            + (f" No email address was found for {', '.join(missing)}." if missing else ""))
+            sent = await google.add_guests(existing, emails)
+            line = (f"Invitation to {existing['title']} sent to {', '.join(emails)}." if sent
+                    else f"I couldn't add {', '.join(emails)} to {existing['title']}.")
+            return ToolResult(text=line, done=[{"id": f"event:{existing['id']}", "kind": "said" if sent else "failed",
+                                                "text": line, "due": due, "dueText": None}])
     result = await _act(store, {
         "action": "book", "what": title, "when": when, "guests": emails,
         "minutes": int(args.get("minutes") or 30), "where": str(args.get("where") or "").strip(),
